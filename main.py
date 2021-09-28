@@ -33,7 +33,6 @@ if __name__ == '__main__':
                         type=int)  # seed = 1209384756
 
     # model configuration
-    parser.add_argument('--num_blocks', default=2, type=int)
     parser.add_argument('--hidden_dims', default='1024,128,8', type=str)
     parser.add_argument('--activation_fn', default='tanh', type=str)
     parser.add_argument('--early_fuse', action='store_true')
