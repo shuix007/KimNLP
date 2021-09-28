@@ -18,13 +18,13 @@ if __name__ == '__main__':
     parser.add_argument('--workspace', required=True)
 
     # training configuration
-    parser.add_argument('--batch_size', default=128, type=int)
+    parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--batch_size_finetune', default=8, type=int)
-    parser.add_argument('--lr', default=0.001, type=float)
+    parser.add_argument('--lr', default=0.0001, type=float)
     parser.add_argument('--lr_finetune', default=5e-5, type=float)
     parser.add_argument('--num_epochs', default=100, type=int)
     parser.add_argument('--dropout_rate', default=0.2, type=float)
-    parser.add_argument('--l2', default=0.0001, type=float)
+    parser.add_argument('--l2', default=0., type=float)
     parser.add_argument('--device', default='cuda', type=str)
     parser.add_argument('--split_ratios', default='0.7,0.2,0.1', type=str)
     parser.add_argument('--tol', default=5, type=int)
@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
     modelname = 'allenai/scibert_scivocab_uncased'
-    split_ratios = list(map(int, args.split_ratios.split(',')))
+    split_ratios = list(map(float, args.split_ratios.split(',')))
     hidden_dims = list(map(int, args.hidden_dims.split(',')))
 
     token_train_data, token_val_data, token_test_data = create_data_channels(
@@ -83,7 +83,7 @@ if __name__ == '__main__':
             hidden_list=hidden_dims,
             n_classes=n_classes,
             activation=torch.nn.ReLU(),
-            dropout=args.dropout,
+            dropout=args.dropout_rate,
             device=args.device
         ).to(args.device)
 
@@ -97,7 +97,7 @@ if __name__ == '__main__':
             hidden_list=hidden_dims,
             n_classes=n_classes,
             activation=torch.nn.ReLU(),
-            dropout=args.dropout,
+            dropout=args.dropout_rate,
             device=args.device
         ).to(args.device)
 

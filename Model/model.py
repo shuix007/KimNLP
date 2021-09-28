@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 
 from transformers import AutoModel
-from layers import DenseLayer
+from .layers import DenseLayer
 
 
 class LanguageModel(nn.Module):
     def __init__(self, modelname, device, rawtext_readout, context_readout, intra_context_pooling):
+        super(LanguageModel, self).__init__()
         self.device = device
         self.modelname = modelname
         self.rawtext_readout = rawtext_readout
@@ -21,6 +22,7 @@ class LanguageModel(nn.Module):
             'max', 'mean', 'sum'], 'Pooling type {} is not supported.'.format(self.intra_context_pooling)
 
         self.model = AutoModel.from_pretrained(modelname)
+        self.hidden_size = self.model.config.hidden_size
 
     def _context_readout(self, lm_output, readout_mask=None):
         bert_dims = lm_output.last_hidden_state.size(-1)
@@ -45,7 +47,7 @@ class LanguageModel(nn.Module):
     def _to_device(self, input_dict):
         output_dict = {}
         for key, value in input_dict.items():
-            output_dict[key] = value.to(self.device)
+            output_dict[key] = value.to(self.device) if len(value.size()) == 2 else value.to(self.device).squeeze(0)
         return output_dict
 
     def forward(self, input_dict):
@@ -125,7 +127,7 @@ class EarlyFuseClassifier(nn.Module):
         self.mlp_model = mlp_model
 
     def forward(self, fused_text_tokens):
-        lm_output = self.lm_model.context_forward(fused_text_tokens)
+        lm_output = self.lm_model.context_forward(fused_text_tokens).unsqueeze(0)
         logits = self.mlp_model(lm_output)
         return logits
 

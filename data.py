@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 from transformers import BertTokenizer
 
+
 class TokenCollateFn(object):
     def __init__(self):
         pass
@@ -12,12 +13,14 @@ class TokenCollateFn(object):
     def __call__(self, samples):
         map(list, zip(*samples))
 
+
 class TensorCollateFn(object):
     def __init__(self):
         pass
 
     def __call__(self, samples):
         map(list, zip(*samples))
+
 
 class Dataset(object):
     def __init__(self, annotated_data, modelname, early_fuse):
@@ -63,10 +66,10 @@ class Dataset(object):
             return self.__getitem__(self._index)
 
     def get_label_weights(self):
-        labels, counts = np.unique(self.labels, return_counts=True)
+        labels, counts = torch.unique(self.labels, return_counts=True)
 
-        label_weights = np.zeros_like(labels)
-        label_weights[labels] = torch.FloatTensor(counts.max() / counts)
+        label_weights = torch.zeros_like(counts, dtype=torch.float32)
+        label_weights[labels] = counts.max() / counts
 
         return label_weights
 
@@ -105,6 +108,8 @@ class Dataset(object):
                 citing_contexts = citing_contexts[1].strip()
                 j += 1
             self.citation_context_list.append(temp_citation_context_list)
+        
+        self.labels = torch.LongTensor(self.labels)
 
     def _early_fusion(self):
         self.fused_text_list = list()
@@ -119,7 +124,7 @@ class Dataset(object):
 
             self.fused_text_list.append(fused_text)
 
-    def _get_readout_index(tokens):
+    def _get_readout_index(self, tokens):
         cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
         readout_index = []
 
@@ -129,7 +134,7 @@ class Dataset(object):
                 readout_index.append(torch.arange(i, i+4))
         return torch.cat(readout_index)
 
-    def _get_readout_mask(tokens, readout_index):
+    def _get_readout_mask(self, tokens, readout_index):
         mask = torch.zeros_like(tokens['input_ids'], dtype=torch.bool)
         mask[0, readout_index] = True
         return mask
@@ -165,10 +170,10 @@ class Dataset(object):
 
         self.fused_text_tokens = list()
 
-        for i in range(len(self.cited_title_list)):
+        for i in tqdm(range(len(self.cited_title_list))):
             self.cited_title_tokens.append(
                 self._tokenize_text(
-                    self.cited_title_tokens[i]
+                    self.cited_title_list[i]
                 )
             )
 
@@ -190,11 +195,11 @@ class Dataset(object):
                 )
             )
 
-            self.citation_context_tokens.append(
+            self.citation_context_tokens.append([
                 self._tokenize_context(
-                    self.citation_context_list[i]
-                )
-            )
+                    ctx
+                ) for ctx in self.citation_context_list[i]
+            ])
 
             self.fused_text_tokens.append(
                 self._tokenize_context(
@@ -217,12 +222,12 @@ class EmbeddedDataset(object):
             self._compute_fused_embeddings(dataset, lm_model)
         else:
             self._compute_raw_embeddings(dataset, lm_model)
-    
-    def get_label_weights(self):
-        labels, counts = np.unique(self.labels, return_counts=True)
 
-        label_weights = np.zeros_like(labels)
-        label_weights[labels] = torch.FloatTensor(counts.max() / counts)
+    def get_label_weights(self):
+        labels, counts = torch.unique(self.labels, return_counts=True)
+
+        label_weights = torch.zeros_like(counts, dtype=torch.float32)
+        label_weights[labels] = counts.max() / counts
 
         return label_weights
 
@@ -266,7 +271,7 @@ class EmbeddedDataset(object):
         model.eval()
         with torch.no_grad():
             print('Computing late-fused embeddings.')
-            for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, _ in dataset:
+            for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, _ in tqdm(dataset):
                 cited_title_embed = model(cited_title).cpu()
                 cited_abstract_embed = model(cited_abstract).cpu()
                 citing_title_embed = model(citing_title).cpu()
@@ -274,7 +279,7 @@ class EmbeddedDataset(object):
 
                 citation_context_embeds = list()
                 for context in citation_context:
-                    context_embed = model.comtext_forward(context)
+                    context_embed = model.context_forward(context)
                     citation_context_embeds.append(context_embed)
                 citation_context_embeds = torch.stack(citation_context_embeds)
 
@@ -310,7 +315,8 @@ class EmbeddedDataset(object):
 
 
 def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
-    assert np.sum(split_ratios) == 1., 'The split ratios must sum to 1.'
+    assert np.abs(np.sum(split_ratios) -
+                  1.) < 1e-8, 'The split ratios must sum to 1 instead of {}'.format(np.sum(split_ratios))
 
     annotated_data = pd.read_csv(filename, sep='\t')
     annotated_data = annotated_data.replace({np.nan: None})
@@ -342,7 +348,7 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
     # map labels to ids
     unique_labels = annotated_data['label'].unique()
     # label2id = {lb: i for i, lb in enumerate(unique_labels)}
-    label2id = {'used': 1, 'not used': 0, 'extended': 0} # binary for now
+    label2id = {'used': 1, 'not used': 0, 'extended': 0}  # binary for now
 
     annotated_data['label'] = annotated_data['label'].apply(
         lambda x: label2id[x])
@@ -365,7 +371,7 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
         num_tests = len(lb_indices) - num_trains - num_vals
 
         lb_train, lb_val, lb_test = np.array_split(
-            lb_indices, [num_trains, num_vals, num_tests])
+            lb_indices, np.cumsum([num_trains, num_vals]))
 
         train_indices.append(lb_train)
         val_indices.append(lb_val)
@@ -375,9 +381,9 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
     val_indices = np.concatenate(val_indices)
     test_indices = np.concatenate(test_indices)
 
-    annotated_data_train = annotated_data.loc[train_indices]
-    annotated_data_val = annotated_data.loc[val_indices]
-    annotated_data_test = annotated_data.loc[test_indices]
+    annotated_data_train = annotated_data.iloc[train_indices].reset_index()
+    annotated_data_val = annotated_data.iloc[val_indices].reset_index()
+    annotated_data_test = annotated_data.iloc[test_indices].reset_index()
 
     train_data = Dataset(annotated_data_train,
                          modelname=modelname, early_fuse=earyly_fuse)

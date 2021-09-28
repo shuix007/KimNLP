@@ -84,7 +84,7 @@ class Trainer(object):
                         count = 0
                         break
 
-            preds = torch.cat(preds, dim=0)
+            preds = torch.stack(preds, dim=0)
             labels = torch.LongTensor(labels).to(self.device)
 
             loss = self.compute_loss(labels, preds)
@@ -118,7 +118,7 @@ class Trainer(object):
                     labels.append(label)
 
             preds = np.concatenate(preds, axis=0)
-            labels = np.array(label, dtype=np.int64)
+            labels = torch.cat(labels, dim=0).numpy()
 
             roc = self.compute_metrics(labels, preds)
             return roc
@@ -176,7 +176,7 @@ class Trainer(object):
     def log_print(self, roc, loss, epoch, train_time, eval_time):
         ''' Stdout of experiment log. '''
 
-        print('Epoch: {}, train time: {:,4f}, eval time: {:.4f}, training loss: {:.4f}, val roc: {:.4f}'.format(
+        print('Epoch: {}, train time: {:.4f}, eval time: {:.4f}, training loss: {:.4f}, val roc: {:.4f}'.format(
             epoch, train_time, eval_time, loss, roc))
 
 
