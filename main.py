@@ -7,7 +7,7 @@ import numpy as np
 from Model import LanguageModel, EarlyFuseClassifier, EarlyFuseMLPClassifier, LateFuseClassifier, LateFuseMLPCLassifier
 from data import EmbeddedDataset, create_data_channels
 from train import Trainer, PreTrainer
-from utils import save_args
+from utils import save_args, select_activation_fn
 
 
 if __name__ == '__main__':
@@ -35,6 +35,7 @@ if __name__ == '__main__':
     # model configuration
     parser.add_argument('--num_blocks', default=2, type=int)
     parser.add_argument('--hidden_dims', default='1024,128,8', type=str)
+    parser.add_argument('--activation_fn', default='tanh', type=str)
     parser.add_argument('--early_fuse', action='store_true')
     parser.add_argument('--rawtext_readout', default='cls', type=str)
     parser.add_argument('--context_readout', default='ch', type=str)
@@ -82,7 +83,7 @@ if __name__ == '__main__':
             input_dims=lm_model.hidden_size,
             hidden_list=hidden_dims,
             n_classes=n_classes,
-            activation=torch.nn.ReLU(),
+            activation=select_activation_fn(args.activation_fn),
             dropout=args.dropout_rate,
             device=args.device
         ).to(args.device)
@@ -103,7 +104,8 @@ if __name__ == '__main__':
 
         model = LateFuseClassifier(
             lm_model=lm_model,
-            mlp_model=mlp_model
+            mlp_model=mlp_model,
+            inter_context_pooling=args.inter_context_pooling
         )
 
     tensor_train_data = EmbeddedDataset(
@@ -120,6 +122,7 @@ if __name__ == '__main__':
         tensor_test_data,
         args
     )
+    print('Pretraining MLP.')
     mlp_trainer.train()
     mlp_trainer.load_model()
     mlp_trainer.test()
@@ -131,6 +134,7 @@ if __name__ == '__main__':
         token_test_data,
         args
     )
+    print('Finetuning LM + MLP.')
     finetuner.train()
     finetuner.load_model()
     finetuner.test()

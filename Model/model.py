@@ -47,7 +47,8 @@ class LanguageModel(nn.Module):
     def _to_device(self, input_dict):
         output_dict = {}
         for key, value in input_dict.items():
-            output_dict[key] = value.to(self.device) if len(value.size()) == 2 else value.to(self.device).squeeze(0)
+            output_dict[key] = value.to(self.device) if len(
+                value.size()) == 2 else value.to(self.device).squeeze(0)
         return output_dict
 
     def forward(self, input_dict):
@@ -127,33 +128,52 @@ class EarlyFuseClassifier(nn.Module):
         self.mlp_model = mlp_model
 
     def forward(self, fused_text_tokens):
-        lm_output = self.lm_model.context_forward(fused_text_tokens).unsqueeze(0)
+        lm_output = self.lm_model.context_forward(
+            fused_text_tokens).unsqueeze(0)
         logits = self.mlp_model(lm_output)
         return logits
 
 
 class LateFuseClassifier(nn.Module):
-    def __init__(self, lm_model, mlp_model):
+    def __init__(self, lm_model, mlp_model, inter_context_pooling):
         super(LateFuseClassifier, self).__init__()
         self.lm_model = lm_model
         self.mlp_model = mlp_model
+
+        self.inter_context_pooling = inter_context_pooling
+        assert self.inter_context_pooling in [
+            'sum', 'max', 'mean', 'topk'], 'Inter context pooling type {} not supported'.format(self.inter_context_pooling)
 
     def forward(self, cited_title_tokens, cited_abstract_tokens, citing_title_tokens, citing_abstract_tokens, citation_context_tokens):
         cited_title_embeds = self.lm_model(cited_title_tokens)
         cited_abstract_embeds = self.lm_model(cited_abstract_tokens)
         citing_title_embeds = self.lm_model(citing_title_tokens)
         citing_abstract_embeds = self.lm_model(citing_abstract_tokens)
-        citation_context_embeds = self.lm_model.context_forward(
-            citation_context_tokens)
 
-        hidden = torch.cat([
-            cited_title_embeds,
-            cited_abstract_embeds,
-            citing_title_embeds,
-            citing_abstract_embeds,
-            citation_context_embeds
-        ], dim=-1)
-        for layer in self.hidden_layers:
-            hidden = self.dropout(layer(hidden))
-        logits = self.top_layer(hidden)
+        citation_context_embeds = list()
+        for context in citation_context_tokens:
+            context_embed = self.lm_model.context_forward(context)
+            citation_context_embeds.append(context_embed)
+        citation_context_embeds = torch.stack(citation_context_embeds)
+
+        if self.inter_context_pooling == 'sum':
+            citation_context_embeds = citation_context_embeds.sum(
+                dim=0)
+        elif self.inter_context_pooling == 'max':
+            citation_context_embeds = citation_context_embeds.max(
+                dim=0).values
+        elif self.inter_context_pooling == 'mean':
+            citation_context_embeds = citation_context_embeds.mean(
+                dim=0)
+        elif self.inter_context_pooling == 'topk':
+            topk = citation_context_embeds.topk(10, dim=0)
+            citation_context_embeds = topk[0].mean(dim=0)
+
+        logits = self.mlp_model(
+            cited_title_embeds.unsqueeze(0),
+            cited_abstract_embeds.unsqueeze(0),
+            citing_title_embeds.unsqueeze(0),
+            citing_abstract_embeds.unsqueeze(0),
+            citation_context_embeds.unsqueeze(0)
+        )
         return logits

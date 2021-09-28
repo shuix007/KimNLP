@@ -84,7 +84,7 @@ class Trainer(object):
                         count = 0
                         break
 
-            preds = torch.stack(preds, dim=0)
+            preds = torch.cat(preds, dim=0)
             labels = torch.LongTensor(labels).to(self.device)
 
             loss = self.compute_loss(labels, preds)

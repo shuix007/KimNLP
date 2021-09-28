@@ -6,22 +6,6 @@ from tqdm import tqdm
 from transformers import BertTokenizer
 
 
-class TokenCollateFn(object):
-    def __init__(self):
-        pass
-
-    def __call__(self, samples):
-        map(list, zip(*samples))
-
-
-class TensorCollateFn(object):
-    def __init__(self):
-        pass
-
-    def __call__(self, samples):
-        map(list, zip(*samples))
-
-
 class Dataset(object):
     def __init__(self, annotated_data, modelname, early_fuse):
         self.early_fuse = early_fuse  # control the way to fetch
@@ -108,7 +92,7 @@ class Dataset(object):
                 citing_contexts = citing_contexts[1].strip()
                 j += 1
             self.citation_context_list.append(temp_citation_context_list)
-        
+
         self.labels = torch.LongTensor(self.labels)
 
     def _early_fusion(self):
@@ -294,7 +278,7 @@ class EmbeddedDataset(object):
                         dim=0).cpu()
                 elif self.inter_context_pooling == 'topk':
                     topk = citation_context_embeds.topk(10, dim=0).cpu()
-                    citation_context_embeds = topk[0].mean(ddim=0).cpu()
+                    citation_context_embeds = topk[0].mean(dim=0).cpu()
 
                 self.cited_title_embeds.append(cited_title_embed)
                 self.cited_abstract_embeds.append(cited_abstract_embed)
