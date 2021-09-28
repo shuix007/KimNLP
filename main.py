@@ -1,41 +1,14 @@
 import os
-from re import M
-
-import time
 import argparse
-
 import torch
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-
 import random
 import numpy as np
 
-from Model import SASRec
-from optimizer import Optimizers
-from data import create_data_channels, CollateFn
-from train import train
-from test import test
-from utils import log_tensorboard, log_print, save_args
+from Model import LanguageModel, EarlyFuseClassifier, EarlyFuseMLPClassifier, LateFuseClassifier, LateFuseMLPCLassifier
+from data import EmbeddedDataset, create_data_channels
+from train import Trainer, PreTrainer
+from utils import save_args
 
-seed = 1209384752;
-# seed = 1209384756
-""" 1209384756"""
-frac_list = [0.05*i for i in range(1, 20)];
-num_runs = 100;
-learning_rate = 5e-5;
-lr1 = 0.0001;
-lr2 = 0.0001;
-lr3 = 0.0001;
-lr4 = 0;
-l2_regularization = 0.0001;
-num_epochs = 100;
-patience = 5;
-batch_size = 8;
-verbose = False;
-hidden_dim = 4;
-save_postfix = "mlp"
-device = 'cuda'
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -46,14 +19,18 @@ if __name__ == '__main__':
 
     # training configuration
     parser.add_argument('--batch_size', default=128, type=int)
+    parser.add_argument('--batch_size_finetune', default=8, type=int)
     parser.add_argument('--lr', default=0.001, type=float)
+    parser.add_argument('--lr_finetune', default=5e-5, type=float)
     parser.add_argument('--num_epochs', default=100, type=int)
     parser.add_argument('--dropout_rate', default=0.2, type=float)
-    parser.add_argument('--l2', default=0.0, type=float)
+    parser.add_argument('--l2', default=0.0001, type=float)
     parser.add_argument('--device', default='cuda', type=str)
-    parser.add_argument('--tol', default=10, type=int)
+    parser.add_argument('--split_ratios', default='0.7,0.2,0.1', type=str)
+    parser.add_argument('--tol', default=5, type=int)
     parser.add_argument('--inference_only', action='store_true')
-    parser.add_argument('--seed', default=1209384752, type=int)
+    parser.add_argument('--seed', default=1209384752,
+                        type=int)  # seed = 1209384756
 
     # model configuration
     parser.add_argument('--num_blocks', default=2, type=int)
@@ -74,3 +51,86 @@ if __name__ == '__main__':
     os.environ['PYTHONHASHSEED'] = str(args.seed)
     torch.backends.cudnn.deterministic = True
 
+    # save the arguments
+    if not os.path.exists(args.workspace):
+        os.mkdir(args.workspace)
+    save_args(args, args.workspace)
+
+    data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
+    modelname = 'allenai/scibert_scivocab_uncased'
+    split_ratios = list(map(int, args.split_ratios.split(',')))
+    hidden_dims = list(map(int, args.hidden_dims.split(',')))
+
+    token_train_data, token_val_data, token_test_data = create_data_channels(
+        data_filename,
+        modelname,
+        split_ratios=split_ratios,
+        earyly_fuse=args.early_fuse
+    )
+    n_classes = len(token_train_data.get_label_weights())
+
+    lm_model = LanguageModel(
+        modelname=modelname,
+        device=args.device,
+        rawtext_readout=args.rawtext_readout,
+        context_readout=args.context_readout,
+        intra_context_pooling=args.intra_context_pooling
+    ).to(args.device)
+
+    if args.early_fuse:
+        mlp_model = EarlyFuseMLPClassifier(
+            input_dims=lm_model.hidden_size,
+            hidden_list=hidden_dims,
+            n_classes=n_classes,
+            activation=torch.nn.ReLU(),
+            dropout=args.dropout,
+            device=args.device
+        ).to(args.device)
+
+        model = EarlyFuseClassifier(
+            lm_model=lm_model,
+            mlp_model=mlp_model
+        )
+    else:
+        mlp_model = LateFuseMLPCLassifier(
+            input_dims=lm_model.hidden_size,
+            hidden_list=hidden_dims,
+            n_classes=n_classes,
+            activation=torch.nn.ReLU(),
+            dropout=args.dropout,
+            device=args.device
+        ).to(args.device)
+
+        model = LateFuseClassifier(
+            lm_model=lm_model,
+            mlp_model=mlp_model
+        )
+
+    tensor_train_data = EmbeddedDataset(
+        token_train_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+    tensor_val_data = EmbeddedDataset(
+        token_val_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+    tensor_test_data = EmbeddedDataset(
+        token_test_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+
+    mlp_trainer = PreTrainer(
+        mlp_model,
+        tensor_train_data,
+        tensor_val_data,
+        tensor_test_data,
+        args
+    )
+    mlp_trainer.train()
+    mlp_trainer.load_model()
+    mlp_trainer.test()
+
+    finetuner = Trainer(
+        model,
+        token_train_data,
+        token_val_data,
+        token_test_data,
+        args
+    )
+    finetuner.train()
+    finetuner.load_model()
+    finetuner.test()

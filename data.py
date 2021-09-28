@@ -5,6 +5,19 @@ from tqdm import tqdm
 
 from transformers import BertTokenizer
 
+class TokenCollateFn(object):
+    def __init__(self):
+        pass
+
+    def __call__(self, samples):
+        map(list, zip(*samples))
+
+class TensorCollateFn(object):
+    def __init__(self):
+        pass
+
+    def __call__(self, samples):
+        map(list, zip(*samples))
 
 class Dataset(object):
     def __init__(self, annotated_data, modelname, early_fuse):
@@ -204,6 +217,14 @@ class EmbeddedDataset(object):
             self._compute_fused_embeddings(dataset, lm_model)
         else:
             self._compute_raw_embeddings(dataset, lm_model)
+    
+    def get_label_weights(self):
+        labels, counts = np.unique(self.labels, return_counts=True)
+
+        label_weights = np.zeros_like(labels)
+        label_weights[labels] = torch.FloatTensor(counts.max() / counts)
+
+        return label_weights
 
     def __len__(self):
         return len(self.labels)
