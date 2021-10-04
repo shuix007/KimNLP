@@ -4,10 +4,11 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam, AdamW
+from torch.optim import Adam, AdamW, lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+from scipy.special import softmax
 from sklearn.metrics import roc_auc_score
 
 
@@ -27,6 +28,8 @@ class Trainer(object):
 
         self.optimizer = AdamW(self.model.parameters(),
                                lr=args.lr_finetune, weight_decay=args.l2)
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
 
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=1, shuffle=True)
@@ -36,7 +39,7 @@ class Trainer(object):
             test_dataset, batch_size=1, shuffle=False)
 
         self.logger = SummaryWriter(
-            os.path.join(self.workspace, 'finetune_log'))
+            os.path.join(self.workspace, 'log'))
 
         self.best_epoch = 0
         self.best_roc = 0.
@@ -45,7 +48,8 @@ class Trainer(object):
         return self.loss_fn(logits, labels)
 
     def compute_metrics(self, labels, logits):
-        return roc_auc_score(labels, logits[:, 1])  # temp
+        # return roc_auc_score(labels, logits[:, 1])  # temp
+        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')  # temp
 
     def early_stop(self, roc, epoch):
         if roc > self.best_roc:
@@ -133,6 +137,7 @@ class Trainer(object):
 
             self.log_tensorboard(roc, loss, epoch)
             self.log_print(roc, loss, epoch, end_train-start, end-end_train)
+            self.scheduler.step()
 
             if self.early_stop(roc=roc, epoch=epoch):
                 break
@@ -141,6 +146,7 @@ class Trainer(object):
         roc = self.eval_one_epoch(test=True)
         print('Test results:')
         print('Test roc: {:.4f}'.format(roc))
+        print('Best val roc: {:.4f}'.format(self.best_roc))
 
     def save_model(self):
         model_filename = os.path.join(self.workspace, 'best_model.pt')
@@ -155,7 +161,8 @@ class Trainer(object):
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict()
         }, checkpoint_filename)
 
     def load_checkpoint(self):
@@ -164,6 +171,7 @@ class Trainer(object):
 
         self.model.load_state_dict(state_dict['model_state_dict'])
         self.optimizer.load_state_dict(state_dict['optimizer_state_dict'])
+        self.scheduler.load_state_dict(state_dict['scheduler_state_dict'])
 
         return state_dict['epoch']
 
@@ -196,6 +204,9 @@ class PreTrainer(Trainer):
 
         self.optimizer = Adam(self.model.parameters(),
                               lr=args.lr, weight_decay=args.l2)
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer, step_size=self.num_epochs, gamma=1.
+        )
 
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -204,7 +215,7 @@ class PreTrainer(Trainer):
         self.test_dataloader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False)
 
-        self.logger = SummaryWriter(os.path.join(self.workspace, 'mlp_log'))
+        self.logger = SummaryWriter(os.path.join(self.workspace, 'log'))
 
         self.best_epoch = 0
         self.best_roc = 0.

@@ -145,6 +145,15 @@ class Dataset(object):
             truncation=True
         )
 
+    def _count_long(self):
+        truncated_length = list()
+        for i in tqdm(range(len(self.fused_text_list))):
+            tk_results = self.tokenizer(self.fused_text_list[i], return_tensors='pt')
+
+            if tk_results['input_ids'].size(1) > 512:
+                truncated_length.append(tk_results['input_ids'].size(1))
+        print('{}/{} sentence truncated, average length of truncated context: {:.4f}/{:.4f}'.format(len(truncated_length), len(self.cited_title_list), np.mean(truncated_length), np.std(truncated_length)))
+
     def _tokenize(self):
         self.cited_title_tokens = list()
         self.citing_title_tokens = list()
@@ -154,6 +163,7 @@ class Dataset(object):
 
         self.fused_text_tokens = list()
 
+        print('Tokenizing.')
         for i in tqdm(range(len(self.cited_title_list))):
             self.cited_title_tokens.append(
                 self._tokenize_text(
@@ -331,8 +341,8 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
 
     # map labels to ids
     unique_labels = annotated_data['label'].unique()
-    # label2id = {lb: i for i, lb in enumerate(unique_labels)}
-    label2id = {'used': 1, 'not used': 0, 'extended': 0}  # binary for now
+    label2id = {lb: i for i, lb in enumerate(unique_labels)}
+    # label2id = {'used': 1, 'not used': 0, 'extended': 0}  # binary for now
 
     annotated_data['label'] = annotated_data['label'].apply(
         lambda x: label2id[x])
@@ -345,7 +355,7 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
     val_indices = list()
     test_indices = list()
 
-    unique_label_ids = [label2id[lb] for lb in unique_labels]
+    unique_label_ids = set([label2id[lb] for lb in unique_labels])
     for lb in unique_label_ids:
         lb_indices = data_indices[annotated_data['label'] == lb]
         np.random.shuffle(lb_indices)

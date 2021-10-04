@@ -18,24 +18,25 @@ if __name__ == '__main__':
     parser.add_argument('--workspace', required=True)
 
     # training configuration
-    parser.add_argument('--batch_size', default=8, type=int)
-    parser.add_argument('--batch_size_finetune', default=8, type=int)
+    parser.add_argument('--batch_size', default=12, type=int)
+    parser.add_argument('--batch_size_finetune', default=12, type=int)
     parser.add_argument('--lr', default=0.0001, type=float)
     parser.add_argument('--lr_finetune', default=5e-5, type=float)
+    parser.add_argument('--decay_rate', default=0.5, type=float)
+    parser.add_argument('--decay_step', default=5, type=int)
     parser.add_argument('--num_epochs', default=100, type=int)
     parser.add_argument('--dropout_rate', default=0.2, type=float)
-    parser.add_argument('--l2', default=0., type=float)
+    parser.add_argument('--l2', default=1e-6, type=float)
     parser.add_argument('--device', default='cuda', type=str)
     parser.add_argument('--split_ratios', default='0.7,0.2,0.1', type=str)
-    parser.add_argument('--tol', default=5, type=int)
+    parser.add_argument('--tol', default=10, type=int)
     parser.add_argument('--inference_only', action='store_true')
     parser.add_argument('--seed', default=1209384752,
                         type=int)  # seed = 1209384756
 
     # model configuration
-    parser.add_argument('--num_blocks', default=2, type=int)
     parser.add_argument('--hidden_dims', default='1024,128,8', type=str)
-    parser.add_argument('--activation_fn', default='tanh', type=str)
+    parser.add_argument('--activation_fn', default='relu', type=str)
     parser.add_argument('--early_fuse', action='store_true')
     parser.add_argument('--rawtext_readout', default='cls', type=str)
     parser.add_argument('--context_readout', default='ch', type=str)
@@ -97,7 +98,7 @@ if __name__ == '__main__':
             input_dims=lm_model.hidden_size,
             hidden_list=hidden_dims,
             n_classes=n_classes,
-            activation=torch.nn.ReLU(),
+            activation=select_activation_fn(args.activation_fn),
             dropout=args.dropout_rate,
             device=args.device
         ).to(args.device)
