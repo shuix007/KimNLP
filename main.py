@@ -35,13 +35,19 @@ if __name__ == '__main__':
                         type=int)  # seed = 1209384756
 
     # model configuration
+    parser.add_argument('--max_length', default=512, type=int)
     parser.add_argument('--hidden_dims', default='1024,128,8', type=str)
     parser.add_argument('--activation_fn', default='relu', type=str)
-    parser.add_argument('--early_fuse', action='store_true')
+    parser.add_argument('--fuse_type', default='bruteforce', type=str)
     parser.add_argument('--rawtext_readout', default='cls', type=str)
     parser.add_argument('--context_readout', default='ch', type=str)
     parser.add_argument('--intra_context_pooling', default='mean', type=str)
     parser.add_argument('--inter_context_pooling', default='mean', type=str)
+
+    # data augmentation configuration
+    parser.add_argument('--da_alpha', default=0.05, type=float)
+    parser.add_argument('--da_n', default=16, type=int)
+    parser.add_argument('--da', action='store_true')
 
     args = parser.parse_args()
 
@@ -59,6 +65,7 @@ if __name__ == '__main__':
     save_args(args, args.workspace)
 
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
+    # modelname = 'xlnet-base-cased' 
     modelname = 'allenai/scibert_scivocab_uncased'
     split_ratios = list(map(float, args.split_ratios.split(',')))
     hidden_dims = list(map(int, args.hidden_dims.split(',')))
@@ -67,7 +74,10 @@ if __name__ == '__main__':
         data_filename,
         modelname,
         split_ratios=split_ratios,
-        earyly_fuse=args.early_fuse
+        fuse_type=args.fuse_type,
+        max_length=args.max_length,
+        da_alpha=args.da_alpha,
+        da_n=args.da_n
     )
     n_classes = len(token_train_data.get_label_weights())
 
@@ -79,7 +89,7 @@ if __name__ == '__main__':
         intra_context_pooling=args.intra_context_pooling
     ).to(args.device)
 
-    if args.early_fuse:
+    if args.fuse_type in ['disttrunc', 'bruteforce']:
         mlp_model = EarlyFuseMLPClassifier(
             input_dims=lm_model.hidden_size,
             hidden_list=hidden_dims,
@@ -110,11 +120,11 @@ if __name__ == '__main__':
         )
 
     tensor_train_data = EmbeddedDataset(
-        token_train_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+        token_train_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
     tensor_val_data = EmbeddedDataset(
-        token_val_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+        token_val_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
     tensor_test_data = EmbeddedDataset(
-        token_test_data, lm_model, args.early_fuse, inter_context_pooling=args.inter_context_pooling)
+        token_test_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
 
     mlp_trainer = PreTrainer(
         mlp_model,
@@ -127,6 +137,9 @@ if __name__ == '__main__':
     mlp_trainer.train()
     mlp_trainer.load_model()
     mlp_trainer.test()
+
+    if args.da:
+        token_train_data.data_augmentation()
 
     finetuner = Trainer(
         model,

@@ -11,13 +11,19 @@ from torch.utils.tensorboard import SummaryWriter
 from scipy.special import softmax
 from sklearn.metrics import roc_auc_score
 
+def get_linear_scheduler(optimizer, num_training_epochs, initial_lr, final_lr=1e-5):
+    assert initial_lr > final_lr, "The initial learning rate must be larger than the final learning rate"
+
+    def lr_lambda(epoch):
+        return (1 - epoch/num_training_epochs) + (epoch/num_training_epochs) * (final_lr/initial_lr)
+    return lr_scheduler.LambdaLR(optimizer, lr_lambda, verbose=True)
 
 class Trainer(object):
     def __init__(self, model, train_dataset, val_dataset, test_dataset, args):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs
-        self.early_fuse = args.early_fuse
+        self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -30,6 +36,8 @@ class Trainer(object):
                                lr=args.lr_finetune, weight_decay=args.l2)
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
+
+        # self.scheduler = get_linear_scheduler(self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune)
 
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=1, shuffle=True)
@@ -193,7 +201,7 @@ class PreTrainer(Trainer):
         self.device = args.device
         self.batch_size = args.batch_size
         self.num_epochs = args.num_epochs
-        self.early_fuse = args.early_fuse
+        self.early_fuse = args.fuse_type in ['disttrunc', 'bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace

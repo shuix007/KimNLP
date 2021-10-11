@@ -3,18 +3,31 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from transformers import BertTokenizer
+from transformers import AutoTokenizer
 
 
 class Dataset(object):
-    def __init__(self, annotated_data, modelname, early_fuse):
-        self.early_fuse = early_fuse  # control the way to fetch
+    def __init__(self, annotated_data, modelname, fuse_type, max_length=512, da_alpha=0.15, da_n=8):
+        self.fuse_type = fuse_type
+        self.early_fuse = fuse_type in ['disttrunc', 'bruteforce']  # control the way to fetch
+        self.max_length = max_length if max_length > 0 else None
+        self.truncation = (max_length > 0)
+        self.tokenizer = AutoTokenizer.from_pretrained(modelname)
 
-        self.tokenizer = BertTokenizer.from_pretrained(modelname)
+        self.da_n = da_n
+        self.da_alpha = da_alpha
+
+        if 'xlnet' in modelname:
+            self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
+                'input_ids'].squeeze()[:5]
+        else:
+            self.cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
 
         self._load_data(annotated_data)
-        self._early_fusion()
-        self._tokenize()
+        if self.early_fuse:
+            self._early_fusion()
+        else:
+            self._tokenize()
 
         self._index = -1
 
@@ -95,10 +108,93 @@ class Dataset(object):
 
         self.labels = torch.LongTensor(self.labels)
 
-    def _early_fusion(self):
-        self.fused_text_list = list()
+    def _merge_tokens(self, main_tokens, added_tokens1, added_tokens2):
+        main_tokens['input_ids'] = torch.cat([
+            main_tokens['input_ids'],
+            added_tokens1['input_ids'][:, 1:],
+            added_tokens2['input_ids'][:, 1:]
+        ], dim=1)
 
-        for i in range(len(self.cited_title_list)):
+        main_tokens['attention_mask'] = torch.ones_like(
+            main_tokens['input_ids'])
+        main_tokens['token_type_ids'] = torch.zeros_like(
+            main_tokens['input_ids'])
+        return main_tokens
+
+    def _early_fusion(self):
+        if self.fuse_type == 'disttrunc':
+            self._early_fusion_distributed_truncation()
+        else:
+            self._early_fusion_bruteforce()
+
+    def _early_fusion_distributed_truncation(self):
+        self.fused_text_tokens = list()
+
+        print('Tokenizing early fused tokens (distributed_truncation).')
+        for i in tqdm(range(len(self.cited_title_list))):
+            fused_contexts = ' [SEP] '.join(self.citation_context_list[i])
+
+            fused_text_tokens = self.tokenizer(
+                fused_contexts,
+                return_tensors='pt',
+                max_length=512,
+                truncation=True
+            )
+
+            if 512 - fused_text_tokens['input_ids'].size(1) >= 2:
+                max_title_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
+
+                cited_title_tokens = self.tokenizer(
+                    self.cited_title_list[i],
+                    return_tensors='pt',
+                    max_length=max_title_len,
+                    truncation=True
+                )
+
+                citing_title_tokens = self.tokenizer(
+                    self.citing_title_list[i],
+                    return_tensors='pt',
+                    max_length=max_title_len,
+                    truncation=True
+                )
+
+                fused_text_tokens = self._merge_tokens(fused_text_tokens, cited_title_tokens, citing_title_tokens)
+
+            if 512 - fused_text_tokens['input_ids'].size(1) >= 2:
+                max_abstract_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
+
+                cited_abstract_tokens = self.tokenizer(
+                    self.cited_abstract_list[i],
+                    return_tensors='pt',
+                    max_length=max_abstract_len,
+                    truncation=True
+                )
+
+                citing_abstract_tokens = self.tokenizer(
+                    self.citing_abstract_list[i],
+                    return_tensors='pt',
+                    max_length=max_abstract_len,
+                    truncation=True
+                )
+
+                fused_text_tokens = self._merge_tokens(fused_text_tokens, cited_abstract_tokens, citing_abstract_tokens)
+
+            if fused_text_tokens['input_ids'].size(1) > 512:
+                print('Wrong')
+                raise ValueError('Wrong')
+
+            fused_text_tokens['readout_mask'] = self._get_readout_mask(
+                fused_text_tokens,
+                self._get_readout_index(fused_text_tokens)
+            )
+
+            self.fused_text_tokens.append(fused_text_tokens)
+
+    def _early_fusion_bruteforce(self):
+        self.fused_text_tokens = list()
+
+        print('Tokenizing early fused tokens (brute force).')
+        for i in tqdm(range(len(self.cited_title_list))):
             fused_text = ' [SEP] '.join(self.citation_context_list[i])
 
             fused_text += (' [SEP] ' + self.cited_title_list[i] +
@@ -106,16 +202,19 @@ class Dataset(object):
                            ' [SEP] ' + self.citing_title_list[i] +
                            ' [SEP] ' + self.citing_abstract_list[i])
 
-            self.fused_text_list.append(fused_text)
+            fused_tokens = self._tokenize_context(fused_text)
+
+            self.fused_text_tokens.append(fused_tokens)
 
     def _get_readout_index(self, tokens):
-        cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
+        # cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
         readout_index = []
 
         l = tokens['input_ids'].size(1)
-        for i in range(1, l - 4):
-            if torch.equal(tokens['input_ids'][0, i:i+4], cited_here_tokens):
-                readout_index.append(torch.arange(i, i+4))
+        ctk_l = self.cited_here_tokens.size(0)
+        for i in range(1, l - ctk_l):
+            if torch.equal(tokens['input_ids'][0, i:i+ctk_l], self.cited_here_tokens):
+                readout_index.append(torch.arange(i, i+ctk_l))
         return torch.cat(readout_index)
 
     def _get_readout_mask(self, tokens, readout_index):
@@ -127,8 +226,8 @@ class Dataset(object):
         tokens = self.tokenizer(
             context,
             return_tensors="pt",
-            max_length=512,
-            truncation=True
+            max_length=self.max_length,
+            truncation=self.truncation
         )
         tokens['readout_mask'] = self._get_readout_mask(
             tokens,
@@ -141,18 +240,20 @@ class Dataset(object):
         return self.tokenizer(
             text,
             return_tensors="pt",
-            max_length=512,
-            truncation=True
+            max_length=self.max_length,
+            truncation=self.truncation
         )
 
     def _count_long(self):
         truncated_length = list()
         for i in tqdm(range(len(self.fused_text_list))):
-            tk_results = self.tokenizer(self.fused_text_list[i], return_tensors='pt')
+            tk_results = self.tokenizer(
+                self.fused_text_list[i], return_tensors='pt')
 
             if tk_results['input_ids'].size(1) > 512:
                 truncated_length.append(tk_results['input_ids'].size(1))
-        print('{}/{} sentence truncated, average length of truncated context: {:.4f}/{:.4f}'.format(len(truncated_length), len(self.cited_title_list), np.mean(truncated_length), np.std(truncated_length)))
+        print('{}/{} sentence truncated, average length of truncated context: {:.4f}/{:.4f}'.format(len(
+            truncated_length), len(self.cited_title_list), np.mean(truncated_length), np.std(truncated_length)))
 
     def _tokenize(self):
         self.cited_title_tokens = list()
@@ -161,9 +262,7 @@ class Dataset(object):
         self.citing_abstract_tokens = list()
         self.citation_context_tokens = list()
 
-        self.fused_text_tokens = list()
-
-        print('Tokenizing.')
+        print('Tokenizing late fused tokens.')
         for i in tqdm(range(len(self.cited_title_list))):
             self.cited_title_tokens.append(
                 self._tokenize_text(
@@ -195,16 +294,88 @@ class Dataset(object):
                 ) for ctx in self.citation_context_list[i]
             ])
 
-            self.fused_text_tokens.append(
-                self._tokenize_context(
-                    self.fused_text_list[i]
-                )
-            )
+    def _mask_tokens(self, tokens):
+        probability_matrix = torch.full(
+            tokens['input_ids'].shape, 1 - self.da_alpha)
+        mask = torch.bernoulli(probability_matrix).bool()
+
+        # set special tokens to be True
+        mask[0, 0] = True
+        mask[0, -1] = True
+        if 'readout_mask' in tokens:
+            mask[tokens['readout_mask']] = True
+
+        tokens2 = dict()
+        tokens2['input_ids'] = tokens['input_ids'][mask].unsqueeze(0)
+        tokens2['token_type_ids'] = tokens['token_type_ids'][mask].unsqueeze(0)
+        tokens2['attention_mask'] = tokens['attention_mask'][mask].unsqueeze(0)
+        if 'readout_mask' in tokens:
+            tokens2['readout_mask'] = tokens['readout_mask'][mask].unsqueeze(0)
+
+        return tokens2
+
+    def data_augmentation(self):
+        print('Augmenting. Alpha')
+        if self.early_fuse:
+            augmented_text_tokens = list()
+            augmented_labels = list()
+            for i in tqdm(range(len(self.fused_text_tokens))):
+                for _ in range(self.da_n):
+                    da_tokens = self._mask_tokens(self.fused_text_tokens[i])
+                    augmented_text_tokens.append(da_tokens)
+                    augmented_labels.append(self.labels[i].item())
+            self.fused_text_tokens = self.fused_text_tokens + augmented_text_tokens
+            self.labels = torch.cat(
+                [self.labels, torch.LongTensor(augmented_labels)])
+        else:
+            augmented_cited_title_tokens = list()
+            augmented_cited_abstract_tokens = list()
+            augmented_citing_title_tokens = list()
+            augmented_citing_abstract_tokens = list()
+            augmented_citation_context_tokens = list()
+            augmented_labels = list()
+
+            for i in tqdm(range(len(self.cited_title_tokens))):
+                for _ in range(self.da_n):
+                    da_cited_title_tokens = self._mask_tokens(
+                        self.cited_title_tokens[i])
+                    da_cited_abstract_tokens = self._mask_tokens(
+                        self.cited_abstract_tokens[i])
+                    da_citing_title_tokens = self._mask_tokens(
+                        self.citing_title_tokens[i])
+                    da_citing_abstract_tokens = self._mask_tokens(
+                        self.citing_abstract_tokens[i])
+
+                    da_citation_context_tokens = [self._mask_tokens(
+                        ctx) for ctx in self.citation_context_tokens[i]]
+
+                    augmented_cited_title_tokens.append(da_cited_title_tokens)
+                    augmented_cited_abstract_tokens.append(
+                        da_cited_abstract_tokens)
+                    augmented_citing_title_tokens.append(
+                        da_citing_title_tokens)
+                    augmented_citing_abstract_tokens.append(
+                        da_citing_abstract_tokens)
+                    augmented_citation_context_tokens.append(
+                        da_citation_context_tokens)
+                    augmented_labels.append(self.labels[i].item())
+
+            self.cited_title_tokens = self.cited_title_tokens + augmented_cited_title_tokens
+            self.cited_abstract_tokens = self.cited_abstract_tokens + \
+                augmented_cited_abstract_tokens
+            self.citing_title_tokens = self.citing_title_tokens + augmented_citing_title_tokens
+            self.citing_abstract_tokens = self.citing_abstract_tokens + \
+                augmented_citing_abstract_tokens
+            self.citation_context_tokens = self.citation_context_tokens + \
+                augmented_citation_context_tokens
+            self.labels = torch.cat(
+                [self.labels, torch.LongTensor(augmented_labels)])
 
 
 class EmbeddedDataset(object):
-    def __init__(self, dataset, lm_model, early_fuse, inter_context_pooling):
-        self.early_fuse = early_fuse
+    def __init__(self, dataset, lm_model, fuse_type, inter_context_pooling):
+        self.fuse_type = fuse_type
+        self.early_fuse = fuse_type in ['disttrunc', 'bruteforce']
         self.inter_context_pooling = inter_context_pooling
 
         assert self.inter_context_pooling in [
@@ -308,7 +479,7 @@ class EmbeddedDataset(object):
                 self.citation_context_embeds)
 
 
-def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
+def create_data_channels(filename, modelname, split_ratios, fuse_type, max_length, da_alpha, da_n):
     assert np.abs(np.sum(split_ratios) -
                   1.) < 1e-8, 'The split ratios must sum to 1 instead of {}'.format(np.sum(split_ratios))
 
@@ -380,10 +551,10 @@ def create_data_channels(filename, modelname, split_ratios, earyly_fuse):
     annotated_data_test = annotated_data.iloc[test_indices].reset_index()
 
     train_data = Dataset(annotated_data_train,
-                         modelname=modelname, early_fuse=earyly_fuse)
+                         modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
     val_data = Dataset(annotated_data_val,
-                       modelname=modelname, early_fuse=earyly_fuse)
+                       modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
     test_data = Dataset(annotated_data_test,
-                        modelname=modelname, early_fuse=earyly_fuse)
+                        modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
 
     return train_data, val_data, test_data

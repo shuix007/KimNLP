@@ -10,6 +10,7 @@ class LanguageModel(nn.Module):
         super(LanguageModel, self).__init__()
         self.device = device
         self.modelname = modelname
+        self.ctk_l = 5 if 'xlnet' in self.modelname else 4
         self.rawtext_readout = rawtext_readout
         self.context_readout = context_readout
         self.intra_context_pooling = intra_context_pooling
@@ -34,7 +35,7 @@ class LanguageModel(nn.Module):
         elif self.context_readout == 'ch':
             if readout_mask is not None:
                 result = lm_output.last_hidden_state[readout_mask].view(
-                    -1, 4, bert_dims).mean(dim=1)
+                    -1, self.ctk_l, bert_dims).mean(dim=1)
                 if self.intra_context_pooling == 'max':
                     return result.max(dim=0).values
                 elif self.intra_context_pooling == 'mean':
