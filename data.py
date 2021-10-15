@@ -141,7 +141,7 @@ class Dataset(object):
                 truncation=True
             )
 
-            if 512 - fused_text_tokens['input_ids'].size(1) >= 2:
+            if 512 - fused_text_tokens['input_ids'].size(1) >= 4:
                 max_title_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
 
                 cited_title_tokens = self.tokenizer(
@@ -160,7 +160,7 @@ class Dataset(object):
 
                 fused_text_tokens = self._merge_tokens(fused_text_tokens, cited_title_tokens, citing_title_tokens)
 
-            if 512 - fused_text_tokens['input_ids'].size(1) >= 2:
+            if 512 - fused_text_tokens['input_ids'].size(1) >= 4:
                 max_abstract_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
 
                 cited_abstract_tokens = self.tokenizer(
@@ -181,6 +181,7 @@ class Dataset(object):
 
             if fused_text_tokens['input_ids'].size(1) > 512:
                 print('Wrong')
+                print(fused_text_tokens['input_ids'].size(1), max_title_len, max_abstract_len)
                 raise ValueError('Wrong')
 
             fused_text_tokens['readout_mask'] = self._get_readout_mask(

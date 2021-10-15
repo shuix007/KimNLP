@@ -9,6 +9,8 @@ from data import EmbeddedDataset, create_data_channels
 from train import Trainer, PreTrainer
 from utils import save_args, select_activation_fn
 
+# change the default cache dir so that huggingface won't take the cse space.
+os.environ['TRANSFORMERS_CACHE'] = '/export/scratch/zeren/KimNLP/HuggingfaceCache/'
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -119,36 +121,47 @@ if __name__ == '__main__':
             inter_context_pooling=args.inter_context_pooling
         )
 
-    tensor_train_data = EmbeddedDataset(
-        token_train_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
-    tensor_val_data = EmbeddedDataset(
-        token_val_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
-    tensor_test_data = EmbeddedDataset(
-        token_test_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
+    if not args.inference_only:
+        tensor_train_data = EmbeddedDataset(
+            token_train_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
+        tensor_val_data = EmbeddedDataset(
+            token_val_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
+        tensor_test_data = EmbeddedDataset(
+            token_test_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
 
-    mlp_trainer = PreTrainer(
-        mlp_model,
-        tensor_train_data,
-        tensor_val_data,
-        tensor_test_data,
-        args
-    )
-    print('Pretraining MLP.')
-    mlp_trainer.train()
-    mlp_trainer.load_model()
-    mlp_trainer.test()
+        mlp_trainer = PreTrainer(
+            mlp_model,
+            tensor_train_data,
+            tensor_val_data,
+            tensor_test_data,
+            args
+        )
+        print('Pretraining MLP.')
+        mlp_trainer.train()
+        mlp_trainer.load_model()
+        mlp_trainer.test()
 
-    if args.da:
-        token_train_data.data_augmentation()
+        if args.da:
+            token_train_data.data_augmentation()
 
-    finetuner = Trainer(
-        model,
-        token_train_data,
-        token_val_data,
-        token_test_data,
-        args
-    )
-    print('Finetuning LM + MLP.')
-    finetuner.train()
-    finetuner.load_model()
-    finetuner.test()
+        finetuner = Trainer(
+            model,
+            token_train_data,
+            token_val_data,
+            token_test_data,
+            args
+        )
+        print('Finetuning LM + MLP.')
+        finetuner.train()
+        finetuner.load_model()
+        finetuner.test()
+    else:
+        finetuner = Trainer(
+            model,
+            token_train_data,
+            token_val_data,
+            token_test_data,
+            args
+        )
+        finetuner.load_model()
+        finetuner.test()
