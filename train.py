@@ -24,6 +24,7 @@ class Trainer(object):
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs
         self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
+        self.context_only = args.context_only
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -32,8 +33,16 @@ class Trainer(object):
         self.loss_fn = nn.CrossEntropyLoss(
             weight=train_dataset.get_label_weights().to(self.device))
 
-        self.optimizer = AdamW(self.model.parameters(),
-                               lr=args.lr_finetune, weight_decay=args.l2)
+        if args.two_step or not args.diff_lr:
+            self.optimizer = AdamW(self.model.parameters(),
+                                lr=args.lr_finetune, weight_decay=args.l2)
+        else:
+            self.optimizer = AdamW([
+                {'params':self.model.lm_model.parameters(), 'lr':args.lr_finetune, 'weight_decay':args.l2},
+                {'params':self.model.mlp_model.parameters(), 'lr':args.lr, 'weight_decay':args.l2}
+            ])
+            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(args.lr_finetune, args.lr))
+            
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
 
@@ -76,7 +85,7 @@ class Trainer(object):
             count = 0
             preds, labels = list(), list()
 
-            if self.early_fuse:
+            if self.early_fuse or self.context_only:
                 for fused_context, label in self.train_dataloader:
                     preds.append(self.model(fused_context))
                     labels.append(label)
@@ -118,7 +127,7 @@ class Trainer(object):
 
         preds, labels = list(), list()
         with torch.no_grad():
-            if self.early_fuse:
+            if self.early_fuse or self.context_only:
                 for fused_context, label in data_loader:
                     preds.append(self.model(
                         fused_context).detach().cpu().numpy())
@@ -202,6 +211,7 @@ class PreTrainer(Trainer):
         self.batch_size = args.batch_size
         self.num_epochs = args.num_epochs
         self.early_fuse = args.fuse_type in ['disttrunc', 'bruteforce']
+        self.context_only = args.context_only
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -232,7 +242,7 @@ class PreTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        if self.early_fuse:
+        if self.early_fuse or self.context_only:
             for fused_context, labels in self.train_dataloader:
                 preds = self.model(fused_context)
                 labels = torch.LongTensor(labels).to(self.device)

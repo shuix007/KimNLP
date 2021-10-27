@@ -1,1 +1,1 @@
-from .model import LanguageModel, EarlyFuseClassifier, LateFuseClassifier, EarlyFuseMLPClassifier, LateFuseMLPCLassifier
+from .model import LanguageModel, EarlyFuseClassifier, LateFuseClassifier, EarlyFuseMLPClassifier, LateFuseMLPCLassifier, ContextOnlyLateFuseClassifier

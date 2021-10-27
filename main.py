@@ -5,6 +5,7 @@ import random
 import numpy as np
 
 from Model import LanguageModel, EarlyFuseClassifier, EarlyFuseMLPClassifier, LateFuseClassifier, LateFuseMLPCLassifier
+from Model.model import ContextOnlyLateFuseClassifier
 from data import EmbeddedDataset, create_data_channels
 from train import Trainer, PreTrainer
 from utils import save_args, select_activation_fn
@@ -33,6 +34,8 @@ if __name__ == '__main__':
     parser.add_argument('--split_ratios', default='0.7,0.2,0.1', type=str)
     parser.add_argument('--tol', default=10, type=int)
     parser.add_argument('--inference_only', action='store_true')
+    parser.add_argument('--two_step', action='store_true')
+    parser.add_argument('--diff_lr', action='store_true')
     parser.add_argument('--seed', default=1209384752,
                         type=int)  # seed = 1209384756
 
@@ -40,6 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_length', default=512, type=int)
     parser.add_argument('--hidden_dims', default='1024,128,8', type=str)
     parser.add_argument('--activation_fn', default='relu', type=str)
+    parser.add_argument('--context_only', action='store_true')
     parser.add_argument('--fuse_type', default='bruteforce', type=str)
     parser.add_argument('--rawtext_readout', default='cls', type=str)
     parser.add_argument('--context_readout', default='ch', type=str)
@@ -77,6 +81,7 @@ if __name__ == '__main__':
         modelname,
         split_ratios=split_ratios,
         fuse_type=args.fuse_type,
+        context_only=args.context_only,
         max_length=args.max_length,
         da_alpha=args.da_alpha,
         da_n=args.da_n
@@ -91,55 +96,88 @@ if __name__ == '__main__':
         intra_context_pooling=args.intra_context_pooling
     ).to(args.device)
 
-    if args.fuse_type in ['disttrunc', 'bruteforce']:
-        mlp_model = EarlyFuseMLPClassifier(
-            input_dims=lm_model.hidden_size,
-            hidden_list=hidden_dims,
-            n_classes=n_classes,
-            activation=select_activation_fn(args.activation_fn),
-            dropout=args.dropout_rate,
-            device=args.device
-        ).to(args.device)
+    if args.context_only:
+        if args.fuse_type in ['disttrunc', 'bruteforce']:
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-        model = EarlyFuseClassifier(
-            lm_model=lm_model,
-            mlp_model=mlp_model
-        )
+            model = EarlyFuseClassifier(
+                lm_model=lm_model,
+                mlp_model=mlp_model
+            )
+        else:
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
+
+            model = ContextOnlyLateFuseClassifier(
+                lm_model=lm_model,
+                mlp_model=mlp_model,
+                inter_context_pooling=args.inter_context_pooling
+            )
     else:
-        mlp_model = LateFuseMLPCLassifier(
-            input_dims=lm_model.hidden_size,
-            hidden_list=hidden_dims,
-            n_classes=n_classes,
-            activation=select_activation_fn(args.activation_fn),
-            dropout=args.dropout_rate,
-            device=args.device
-        ).to(args.device)
+        if args.fuse_type in ['disttrunc', 'bruteforce']:
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-        model = LateFuseClassifier(
-            lm_model=lm_model,
-            mlp_model=mlp_model,
-            inter_context_pooling=args.inter_context_pooling
-        )
+            model = EarlyFuseClassifier(
+                lm_model=lm_model,
+                mlp_model=mlp_model
+            )
+        else:
+            mlp_model = LateFuseMLPCLassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
+
+            model = LateFuseClassifier(
+                lm_model=lm_model,
+                mlp_model=mlp_model,
+                inter_context_pooling=args.inter_context_pooling
+            )
 
     if not args.inference_only:
-        tensor_train_data = EmbeddedDataset(
-            token_train_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
-        tensor_val_data = EmbeddedDataset(
-            token_val_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
-        tensor_test_data = EmbeddedDataset(
-            token_test_data, lm_model, args.fuse_type, inter_context_pooling=args.inter_context_pooling)
 
-        mlp_trainer = PreTrainer(
-            mlp_model,
-            tensor_train_data,
-            tensor_val_data,
-            tensor_test_data,
-            args
-        )
-        print('Pretraining MLP.')
-        mlp_trainer.train()
-        mlp_trainer.load_model()
-        mlp_trainer.test()
+        if args.two_step:
+            tensor_train_data = EmbeddedDataset(
+                token_train_data, lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+            tensor_val_data = EmbeddedDataset(
+                token_val_data, lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+            tensor_test_data = EmbeddedDataset(
+                token_test_data, lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+
+            mlp_trainer = PreTrainer(
+                mlp_model,
+                tensor_train_data,
+                tensor_val_data,
+                tensor_test_data,
+                args
+            )
+            print('Pretraining MLP.')
+            mlp_trainer.train()
+            mlp_trainer.load_model()
+            mlp_trainer.test()
 
         if args.da:
             token_train_data.data_augmentation()

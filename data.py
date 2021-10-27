@@ -7,9 +7,10 @@ from transformers import AutoTokenizer
 
 
 class Dataset(object):
-    def __init__(self, annotated_data, modelname, fuse_type, max_length=512, da_alpha=0.15, da_n=8):
+    def __init__(self, annotated_data, modelname, fuse_type, context_only, max_length=512, da_alpha=0.15, da_n=8):
         self.fuse_type = fuse_type
         self.early_fuse = fuse_type in ['disttrunc', 'bruteforce']  # control the way to fetch
+        self.context_only = context_only
         self.max_length = max_length if max_length > 0 else None
         self.truncation = (max_length > 0)
         self.tokenizer = AutoTokenizer.from_pretrained(modelname)
@@ -24,10 +25,16 @@ class Dataset(object):
             self.cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
 
         self._load_data(annotated_data)
-        if self.early_fuse:
-            self._early_fusion()
+        if self.context_only:
+            if self.early_fuse:
+                self._early_fusion_context_only()
+            else:
+                self._late_fusion_context_only()
         else:
-            self._tokenize()
+            if self.early_fuse:
+                self._early_fusion()
+            else:
+                self._tokenize()
 
         self._index = -1
 
@@ -36,20 +43,32 @@ class Dataset(object):
 
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        if self.early_fuse:
-            return (
-                self.fused_text_tokens[idx],
-                self.labels[idx]
-            )
+        if self.context_only:
+            if self.early_fuse:
+                return (
+                    self.fused_citation_context_tokens[idx],
+                    self.labels[idx]
+                )
+            else:
+                return (
+                    self.citation_context_tokens[idx],
+                    self.labels[idx]
+                )
         else:
-            return (
-                self.cited_title_tokens[idx],
-                self.cited_abstract_tokens[idx],
-                self.citing_title_tokens[idx],
-                self.citing_abstract_tokens[idx],
-                self.citation_context_tokens[idx],
-                self.labels[idx]
-            )
+            if self.early_fuse:
+                return (
+                    self.fused_text_tokens[idx],
+                    self.labels[idx]
+                )
+            else:
+                return (
+                    self.cited_title_tokens[idx],
+                    self.cited_abstract_tokens[idx],
+                    self.citing_title_tokens[idx],
+                    self.citing_abstract_tokens[idx],
+                    self.citation_context_tokens[idx],
+                    self.labels[idx]
+                )
 
     def __iter__(self):
         return self
@@ -295,6 +314,27 @@ class Dataset(object):
                 ) for ctx in self.citation_context_list[i]
             ])
 
+    def _early_fusion_context_only(self):
+        self.fused_citation_context_tokens = list()
+
+        print('Tokenizing early fused tokens (context only).')
+        for i in tqdm(range(len(self.citation_context_list))):
+            fused_text = ' [SEP] '.join(self.citation_context_list[i])
+            fused_tokens = self._tokenize_context(fused_text)
+
+            self.fused_citation_context_tokens.append(fused_tokens)
+
+    def _late_fusion_context_only(self):
+        self.citation_context_tokens = list()
+
+        print('Tokenizing late fused tokens (context only).')
+        for i in tqdm(range(len(self.citation_context_list))):
+            self.citation_context_tokens.append([
+                self._tokenize_context(
+                    ctx
+                ) for ctx in self.citation_context_list[i]
+            ])
+
     def _mask_tokens(self, tokens):
         probability_matrix = torch.full(
             tokens['input_ids'].shape, 1 - self.da_alpha)
@@ -374,9 +414,10 @@ class Dataset(object):
 
 
 class EmbeddedDataset(object):
-    def __init__(self, dataset, lm_model, fuse_type, inter_context_pooling):
+    def __init__(self, dataset, lm_model, fuse_type, context_only, inter_context_pooling):
         self.fuse_type = fuse_type
         self.early_fuse = fuse_type in ['disttrunc', 'bruteforce']
+        self.context_only = context_only
         self.inter_context_pooling = inter_context_pooling
 
         assert self.inter_context_pooling in [
@@ -384,10 +425,16 @@ class EmbeddedDataset(object):
 
         self.labels = dataset.labels
 
-        if self.early_fuse:
-            self._compute_fused_embeddings(dataset, lm_model)
+        if self.context_only:
+            if self.early_fuse:
+                self._compute_fused_embeddings(dataset, lm_model)
+            else:
+                self._compute_late_fused_embeddings(dataset, lm_model)
         else:
-            self._compute_raw_embeddings(dataset, lm_model)
+            if self.early_fuse:
+                self._compute_fused_embeddings(dataset, lm_model)
+            else:
+                self._compute_raw_embeddings(dataset, lm_model)
 
     def get_label_weights(self):
         labels, counts = torch.unique(self.labels, return_counts=True)
@@ -401,20 +448,32 @@ class EmbeddedDataset(object):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        if self.early_fuse:
-            return (
-                self.fused_context_embeds[idx],
-                self.labels[idx]
-            )
+        if self.context_only:
+            if self.early_fuse:
+                return (
+                    self.fused_context_embeds[idx],
+                    self.labels[idx]
+                )
+            else:
+                return (
+                    self.citation_context_embeds[idx],
+                    self.labels[idx]
+                )
         else:
-            return (
-                self.cited_title_embeds[idx],
-                self.cited_abstract_embeds[idx],
-                self.citing_title_embeds[idx],
-                self.citing_abstract_embeds[idx],
-                self.citation_context_embeds[idx],
-                self.labels[idx]
-            )
+            if self.early_fuse:
+                return (
+                    self.fused_context_embeds[idx],
+                    self.labels[idx]
+                )
+            else:
+                return (
+                    self.cited_title_embeds[idx],
+                    self.cited_abstract_embeds[idx],
+                    self.citing_title_embeds[idx],
+                    self.citing_abstract_embeds[idx],
+                    self.citation_context_embeds[idx],
+                    self.labels[idx]
+                )
 
     def _compute_fused_embeddings(self, dataset, model):
         self.fused_context_embeds = list()
@@ -478,9 +537,40 @@ class EmbeddedDataset(object):
                 self.citing_abstract_embeds)
             self.citation_context_embeds = torch.stack(
                 self.citation_context_embeds)
+    
+    def _compute_late_fused_embeddings(self, dataset, model):
+        self.citation_context_embeds = list()
+
+        model.eval()
+        with torch.no_grad():
+            print('Computing late-fused embeddings.')
+            for citation_context, _ in tqdm(dataset):
+                citation_context_embeds = list()
+                for context in citation_context:
+                    context_embed = model.context_forward(context)
+                    citation_context_embeds.append(context_embed)
+                citation_context_embeds = torch.stack(citation_context_embeds)
+
+                if self.inter_context_pooling == 'sum':
+                    citation_context_embeds = citation_context_embeds.sum(
+                        dim=0).cpu()
+                elif self.inter_context_pooling == 'max':
+                    citation_context_embeds = citation_context_embeds.max(
+                        dim=0).values.cpu()
+                elif self.inter_context_pooling == 'mean':
+                    citation_context_embeds = citation_context_embeds.mean(
+                        dim=0).cpu()
+                elif self.inter_context_pooling == 'topk':
+                    topk = citation_context_embeds.topk(10, dim=0).cpu()
+                    citation_context_embeds = topk[0].mean(dim=0).cpu()
+
+                self.citation_context_embeds.append(citation_context_embeds)
+
+            self.citation_context_embeds = torch.stack(
+                self.citation_context_embeds)
 
 
-def create_data_channels(filename, modelname, split_ratios, fuse_type, max_length, da_alpha, da_n):
+def create_data_channels(filename, modelname, split_ratios, fuse_type, context_only, max_length, da_alpha, da_n):
     assert np.abs(np.sum(split_ratios) -
                   1.) < 1e-8, 'The split ratios must sum to 1 instead of {}'.format(np.sum(split_ratios))
 
@@ -501,7 +591,7 @@ def create_data_channels(filename, modelname, split_ratios, fuse_type, max_lengt
         else:
             label = str(annotated_data['new annotation'][i]).strip().lower()
 
-        if label in ['used', 'not used', 'extended']:
+        if label in ['used', 'not used', 'extended', 'background', 'result', 'method']:
             valid_index[i] = True
             annotated_labels.append(label)
         else:
@@ -552,10 +642,10 @@ def create_data_channels(filename, modelname, split_ratios, fuse_type, max_lengt
     annotated_data_test = annotated_data.iloc[test_indices].reset_index()
 
     train_data = Dataset(annotated_data_train,
-                         modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
+                         modelname=modelname, fuse_type=fuse_type, context_only=context_only, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
     val_data = Dataset(annotated_data_val,
-                       modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
+                       modelname=modelname, fuse_type=fuse_type, context_only=context_only, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
     test_data = Dataset(annotated_data_test,
-                        modelname=modelname, fuse_type=fuse_type, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
+                        modelname=modelname, fuse_type=fuse_type, context_only=context_only, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
 
     return train_data, val_data, test_data
