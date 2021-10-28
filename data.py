@@ -9,7 +9,8 @@ from transformers import AutoTokenizer
 class Dataset(object):
     def __init__(self, annotated_data, modelname, fuse_type, context_only, max_length=512, da_alpha=0.15, da_n=8):
         self.fuse_type = fuse_type
-        self.early_fuse = fuse_type in ['disttrunc', 'bruteforce']  # control the way to fetch
+        self.early_fuse = fuse_type in [
+            'disttrunc', 'bruteforce']  # control the way to fetch
         self.context_only = context_only
         self.max_length = max_length if max_length > 0 else None
         self.truncation = (max_length > 0)
@@ -161,7 +162,8 @@ class Dataset(object):
             )
 
             if 512 - fused_text_tokens['input_ids'].size(1) >= 4:
-                max_title_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
+                max_title_len = (
+                    512 - fused_text_tokens['input_ids'].size(1)) // 2
 
                 cited_title_tokens = self.tokenizer(
                     self.cited_title_list[i],
@@ -177,10 +179,12 @@ class Dataset(object):
                     truncation=True
                 )
 
-                fused_text_tokens = self._merge_tokens(fused_text_tokens, cited_title_tokens, citing_title_tokens)
+                fused_text_tokens = self._merge_tokens(
+                    fused_text_tokens, cited_title_tokens, citing_title_tokens)
 
             if 512 - fused_text_tokens['input_ids'].size(1) >= 4:
-                max_abstract_len = (512 - fused_text_tokens['input_ids'].size(1)) // 2
+                max_abstract_len = (
+                    512 - fused_text_tokens['input_ids'].size(1)) // 2
 
                 cited_abstract_tokens = self.tokenizer(
                     self.cited_abstract_list[i],
@@ -196,11 +200,13 @@ class Dataset(object):
                     truncation=True
                 )
 
-                fused_text_tokens = self._merge_tokens(fused_text_tokens, cited_abstract_tokens, citing_abstract_tokens)
+                fused_text_tokens = self._merge_tokens(
+                    fused_text_tokens, cited_abstract_tokens, citing_abstract_tokens)
 
             if fused_text_tokens['input_ids'].size(1) > 512:
                 print('Wrong')
-                print(fused_text_tokens['input_ids'].size(1), max_title_len, max_abstract_len)
+                print(fused_text_tokens['input_ids'].size(
+                    1), max_title_len, max_abstract_len)
                 raise ValueError('Wrong')
 
             fused_text_tokens['readout_mask'] = self._get_readout_mask(
@@ -537,7 +543,7 @@ class EmbeddedDataset(object):
                 self.citing_abstract_embeds)
             self.citation_context_embeds = torch.stack(
                 self.citation_context_embeds)
-    
+
     def _compute_late_fused_embeddings(self, dataset, model):
         self.citation_context_embeds = list()
 
@@ -568,6 +574,36 @@ class EmbeddedDataset(object):
 
             self.citation_context_embeds = torch.stack(
                 self.citation_context_embeds)
+
+
+class MultiHeadDatasets(object):
+    def __init__(self, datasets, p=None):
+        self.datasets = datasets
+        self.p = p if p is not None else np.full(len(self.datasets), 1. / len(
+            self.datasets), dtype=np.float32)  # sample probability for the datasets
+
+        self.lengths = np.array([len(dataset) for dataset in self.datasets])
+        self.lengths_cumsum = self.lengths.cumsum()
+        self.total_length = self.lengths_cumsum[-1]
+
+    def __len__(self):
+        return self.total_length
+
+    def __getitem__(self, idx):
+        # initial guess
+        true_idx = idx
+        data_idx = 0
+
+        for i in range(1, len(self.datasets)):
+            if idx >= self.lengths_cumsum[i-1] and idx < self.lengths_cumsum[i]:
+                true_idx = idx - self.lengths_cumsum[i-1]
+                data_idx = i
+
+        instance = self.datasets[data_idx].__getitem__(true_idx)
+        instance = map(list, zip(*instance))
+
+        # append the data head to the start of the
+        return [data_idx] + instance
 
 
 def create_data_channels(filename, modelname, split_ratios, fuse_type, context_only, max_length, da_alpha, da_n):
