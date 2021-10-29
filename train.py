@@ -42,7 +42,7 @@ class Trainer(object):
                 {'params':self.model.mlp_model.parameters(), 'lr':args.lr, 'weight_decay':args.l2}
             ])
             print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(args.lr_finetune, args.lr))
-            
+
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
 
@@ -297,3 +297,121 @@ class PreTrainer(Trainer):
         self.optimizer.load_state_dict(state_dict['optimizer_state_dict'])
 
         return state_dict['epoch']
+
+class MultiHeadTrainer(Trainer):
+    def __init__(self, model, train_datasets, val_dataset, test_dataset, args):
+        self.device = args.device
+        self.batch_size = args.batch_size_finetune
+        self.num_epochs = args.num_epochs
+        self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
+        self.context_only = args.context_only
+        self.tol = args.tol
+
+        self.workspace = args.workspace
+        self.model = model
+
+        self.loss_fns = [nn.CrossEntropyLoss(weight=lb_weights.to(self.device)) for lb_weights in train_datasets.get_label_weights()]
+
+        if args.two_step or not args.diff_lr:
+            self.optimizer = AdamW(self.model.parameters(),
+                                lr=args.lr_finetune, weight_decay=args.l2)
+        else:
+            self.optimizer = AdamW([
+                {'params':self.model.lm_model.parameters(), 'lr':args.lr_finetune, 'weight_decay':args.l2},
+                {'params':self.model.mlp_model.parameters(), 'lr':args.lr, 'weight_decay':args.l2}
+            ])
+            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(args.lr_finetune, args.lr))
+
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
+
+        # self.scheduler = get_linear_scheduler(self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune)
+
+        self.train_dataloader = DataLoader(
+            train_datasets, batch_size=1, shuffle=True)
+        self.val_dataloader = DataLoader(
+            val_dataset, batch_size=1, shuffle=False)
+        self.test_dataloader = DataLoader(
+            test_dataset, batch_size=1, shuffle=False)
+
+        self.logger = SummaryWriter(
+            os.path.join(self.workspace, 'log'))
+
+        self.best_epoch = 0
+        self.best_roc = 0.
+
+    def compute_loss(self, labels, logits):
+        return self.loss_fn(logits, labels)
+
+    def compute_metrics(self, labels, logits):
+        # return roc_auc_score(labels, logits[:, 1])  # temp
+        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')  # temp
+
+    def train_one_epoch(self):
+        total_loss = 0.
+        self.model.train()
+
+        num_batches = (len(self.train_dataloader) // self.batch_size) + 1
+        for _ in range(num_batches):
+            count = 0
+            preds, labels = list(), list()
+
+            if self.early_fuse or self.context_only:
+                for instances in self.train_dataloader:
+                    fused_context, label
+                    preds.append(self.model(fused_context))
+                    labels.append(label)
+                    count += 1
+
+                    if count == self.batch_size:
+                        count = 0
+                        break
+            else:
+                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in self.train_dataloader:
+                    preds.append(self.model(cited_title, cited_abstract,
+                                 citing_title, citing_abstract, citation_context))
+                    labels.append(label)
+                    count += 1
+
+                    if count == self.batch_size:
+                        count = 0
+                        break
+
+            preds = torch.cat(preds, dim=0)
+            labels = torch.LongTensor(labels).to(self.device)
+
+            loss = self.compute_loss(labels, preds)
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            total_loss += loss.item()
+
+        return total_loss / num_batches
+
+    def eval_one_epoch(self, test):
+        self.model.eval()
+
+        if test:
+            data_loader = self.test_dataloader  # for inference
+        else:
+            data_loader = self.val_dataloader  # for validation
+
+        preds, labels = list(), list()
+        with torch.no_grad():
+            if self.early_fuse or self.context_only:
+                for fused_context, label in data_loader:
+                    preds.append(self.model(
+                        fused_context).detach().cpu().numpy())
+                    labels.append(label)
+            else:
+                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
+                    preds.append(self.model(cited_title, cited_abstract, citing_title,
+                                 citing_abstract, citation_context).detach().cpu().numpy())
+                    labels.append(label)
+
+            preds = np.concatenate(preds, axis=0)
+            labels = torch.cat(labels, dim=0).numpy()
+
+            roc = self.compute_metrics(labels, preds)
+            return roc

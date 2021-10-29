@@ -583,27 +583,32 @@ class MultiHeadDatasets(object):
             self.datasets), dtype=np.float32)  # sample probability for the datasets
 
         self.lengths = np.array([len(dataset) for dataset in self.datasets])
-        self.lengths_cumsum = self.lengths.cumsum()
-        self.total_length = self.lengths_cumsum[-1]
+        self.main_length = self.lengths[0]
 
     def __len__(self):
-        return self.total_length
+        return self.lengths[0]
 
     def __getitem__(self, idx):
-        # initial guess
-        true_idx = idx
-        data_idx = 0
+        indices = self._get_indices(idx)
 
-        for i in range(1, len(self.datasets)):
-            if idx >= self.lengths_cumsum[i-1] and idx < self.lengths_cumsum[i]:
-                true_idx = idx - self.lengths_cumsum[i-1]
-                data_idx = i
+        instances = [d.__getitem__(indices[i]) for i, d in enumerate(self.datasets)]
+        return instances
 
-        instance = self.datasets[data_idx].__getitem__(true_idx)
-        instance = map(list, zip(*instance))
+    def _get_indices(self, idx):
+        indices = list()
+        for i, l in enumerate(self.lengths):
+            if l < self.main_length:
+                indices.append(int((idx / self.main_length) * l))
+            elif l > self.main_length:
+                portion = l / self.main_length
+                idx_low, idx_high = int(idx*portion), int((idx+1)*portion)
+                indices.append(np.random.randint(idx_low, idx_high))
+            else:
+                indices.append(idx)
+        return indices
 
-        # append the data head to the start of the
-        return [data_idx] + instance
+    def get_label_weights(self):
+        return [d.get_label_weights() for d in self.datasets]
 
 
 def create_data_channels(filename, modelname, split_ratios, fuse_type, context_only, max_length, da_alpha, da_n):
