@@ -10,21 +10,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 from scipy.special import softmax
 from sklearn.metrics import roc_auc_score
-
-
-def get_linear_scheduler(optimizer, num_training_epochs, initial_lr, final_lr=1e-5):
-    assert initial_lr > final_lr, "The initial learning rate must be larger than the final learning rate"
-
-    def lr_lambda(epoch):
-        return (1 - epoch/num_training_epochs) + (epoch/num_training_epochs) * (final_lr/initial_lr)
-    return lr_scheduler.LambdaLR(optimizer, lr_lambda, verbose=True)
+from scheduler import get_slanted_triangular_scheduler, get_linear_scheduler
 
 
 class Trainer(object):
     def __init__(self, model, train_dataset, val_dataset, test_dataset, args):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
-        self.num_epochs = args.num_epochs
+        self.num_epochs = args.num_epochs_finetune
         self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
         self.context_only = args.context_only
         self.tol = args.tol
@@ -48,10 +41,19 @@ class Trainer(object):
             print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(
                 args.lr_finetune, args.lr))
 
-        self.scheduler = lr_scheduler.StepLR(
-            self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
-
-        # self.scheduler = get_linear_scheduler(self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune)
+        if args.scheduler == 'exp':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
+        elif args.scheduler == 'slanted':
+            self.scheduler = get_slanted_triangular_scheduler(
+                self.optimizer, num_epochs=self.num_epochs)
+        elif args.scheduler == 'linear':
+            self.scheduler = get_linear_scheduler(
+                self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune, final_lr=args.lr_finetune/32)
+        else:
+            raise ValueError(
+                'Scheduler {} not implemented.'.format(args.scheduler))
+        print('Using {} scheduler.'.format(args.scheduler))
 
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=1, shuffle=True)
@@ -370,7 +372,7 @@ class MultiHeadTrainer(Trainer):
                 logits[head_idx],
                 labels[head_idx]
             ) * self.lambdas[head_idx]
-            
+
         return loss
 
     def train_one_epoch(self):

@@ -30,6 +30,8 @@ if __name__ == '__main__':
     parser.add_argument('--decay_rate', default=0.5, type=float)
     parser.add_argument('--decay_step', default=5, type=int)
     parser.add_argument('--num_epochs', default=100, type=int)
+    parser.add_argument('--num_epochs_finetune', default=100, type=int)
+    parser.add_argument('--scheduler', default='slanted', type=str)
     parser.add_argument('--dropout_rate', default=0.2, type=float)
     parser.add_argument('--l2', default=1e-6, type=float)
     parser.add_argument('--device', default='cuda', type=str)
