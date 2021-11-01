@@ -591,7 +591,8 @@ class MultiHeadDatasets(object):
     def __getitem__(self, idx):
         indices = self._get_indices(idx)
 
-        instances = [d.__getitem__(indices[i]) for i, d in enumerate(self.datasets)]
+        instances = [d.__getitem__(indices[i])
+                     for i, d in enumerate(self.datasets)]
         return instances
 
     def _get_indices(self, idx):
@@ -632,7 +633,7 @@ def create_data_channels(filename, modelname, split_ratios, fuse_type, context_o
         else:
             label = str(annotated_data['new annotation'][i]).strip().lower()
 
-        if label in ['used', 'not used', 'extended', 'background', 'result', 'method']:
+        if label in ['used', 'not used', 'extended', 'background', 'result', 'method', 'background', 'uses', 'compareorcontrast', 'motivation', 'future', 'extends']:
             valid_index[i] = True
             annotated_labels.append(label)
         else:
@@ -690,3 +691,52 @@ def create_data_channels(filename, modelname, split_ratios, fuse_type, context_o
                         modelname=modelname, fuse_type=fuse_type, context_only=context_only, max_length=max_length, da_alpha=da_alpha, da_n=da_n)
 
     return train_data, val_data, test_data
+
+
+def create_single_data_channels(filename, modelname, fuse_type, context_only, max_length, da_alpha, da_n):
+    annotated_data = pd.read_csv(filename, sep='\t')
+    annotated_data = annotated_data.replace({np.nan: None})
+
+    valid_index = np.zeros(annotated_data.shape[0], dtype=bool)
+    annotated_labels = list()
+
+    # filter out instances that are mot labelled or have invalid labels
+    for i in range(len(annotated_data.index)):
+        if annotated_data['new annotation'][i] is None:
+            if annotated_data['previous annotation'][i] is None:
+                print("Instance {} not labeled.".format(i))
+                continue
+            label = str(
+                annotated_data['previous annotation'][i]).strip().lower()
+        else:
+            label = str(annotated_data['new annotation'][i]).strip().lower()
+
+        if label in ['used', 'not used', 'extended', 'background', 'result', 'method']:
+            valid_index[i] = True
+            annotated_labels.append(label)
+        else:
+            print('The label {} of instance {} is not valid.'.format(label, i))
+
+    print('Number of valid data instance: {}'.format(valid_index.sum()))
+    annotated_data = annotated_data[valid_index]
+    annotated_data['label'] = annotated_labels
+
+    # map labels to ids
+    unique_labels = annotated_data['label'].unique()
+    label2id = {lb: i for i, lb in enumerate(unique_labels)}
+    # label2id = {'used': 1, 'not used': 0, 'extended': 0}  # binary for now
+
+    annotated_data['label'] = annotated_data['label'].apply(
+        lambda x: label2id[x])
+
+    data = Dataset(
+        annotated_data,
+        modelname=modelname,
+        fuse_type=fuse_type,
+        context_only=context_only,
+        max_length=max_length,
+        da_alpha=da_alpha,
+        da_n=da_n
+    )
+
+    return data

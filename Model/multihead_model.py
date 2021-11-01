@@ -5,7 +5,10 @@ class MultiHeadEarlyFuseClassifier(nn.Module):
     def __init__(self, lm_model, mlp_models):
         super(MultiHeadEarlyFuseClassifier, self).__init__()
         self.lm_model = lm_model
-        self.mlp_models = nn.ModuleList(mlp_models)
+        # self.mlp_models = nn.ModuleList(mlp_models)
+        self.mlp_models = mlp_models
+
+        self.num_heads = len(mlp_models)
 
     def forward(self, head_idx, fused_text_tokens):
         lm_output = self.lm_model.context_forward(
@@ -18,7 +21,10 @@ class MultiHeadLateFuseClassifier(nn.Module):
     def __init__(self, lm_model, mlp_models, inter_context_pooling):
         super(MultiHeadLateFuseClassifier, self).__init__()
         self.lm_model = lm_model
-        self.mlp_models = nn.ModuleList(mlp_models)
+        # self.mlp_models = nn.ModuleList(mlp_models)
+        self.mlp_models = mlp_models
+
+        self.num_heads = len(mlp_models)
 
         self.inter_context_pooling = inter_context_pooling
         assert self.inter_context_pooling in [
@@ -63,7 +69,10 @@ class MultiHeadContextOnlyLateFuseClassifier(nn.Module):
     def __init__(self, lm_model, mlp_models, inter_context_pooling):
         super(MultiHeadContextOnlyLateFuseClassifier, self).__init__()
         self.lm_model = lm_model
-        self.mlp_models = nn.ModuleList(mlp_models)
+        # self.mlp_models = nn.ModuleList(mlp_models)
+        self.mlp_models = mlp_models
+        
+        self.num_heads = len(mlp_models)
 
         self.inter_context_pooling = inter_context_pooling
         assert self.inter_context_pooling in [

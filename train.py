@@ -11,12 +11,14 @@ from torch.utils.tensorboard import SummaryWriter
 from scipy.special import softmax
 from sklearn.metrics import roc_auc_score
 
+
 def get_linear_scheduler(optimizer, num_training_epochs, initial_lr, final_lr=1e-5):
     assert initial_lr > final_lr, "The initial learning rate must be larger than the final learning rate"
 
     def lr_lambda(epoch):
         return (1 - epoch/num_training_epochs) + (epoch/num_training_epochs) * (final_lr/initial_lr)
     return lr_scheduler.LambdaLR(optimizer, lr_lambda, verbose=True)
+
 
 class Trainer(object):
     def __init__(self, model, train_dataset, val_dataset, test_dataset, args):
@@ -35,13 +37,16 @@ class Trainer(object):
 
         if args.two_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
-                                lr=args.lr_finetune, weight_decay=args.l2)
+                                   lr=args.lr_finetune, weight_decay=args.l2)
         else:
             self.optimizer = AdamW([
-                {'params':self.model.lm_model.parameters(), 'lr':args.lr_finetune, 'weight_decay':args.l2},
-                {'params':self.model.mlp_model.parameters(), 'lr':args.lr, 'weight_decay':args.l2}
+                {'params': self.model.lm_model.parameters(), 'lr': args.lr_finetune,
+                 'weight_decay': args.l2},
+                {'params': self.model.mlp_model.parameters(), 'lr': args.lr,
+                 'weight_decay': args.l2}
             ])
-            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(args.lr_finetune, args.lr))
+            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(
+                args.lr_finetune, args.lr))
 
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
@@ -66,7 +71,8 @@ class Trainer(object):
 
     def compute_metrics(self, labels, logits):
         # return roc_auc_score(labels, logits[:, 1])  # temp
-        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')  # temp
+        # temp
+        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')
 
     def early_stop(self, roc, epoch):
         if roc > self.best_roc:
@@ -298,6 +304,7 @@ class PreTrainer(Trainer):
 
         return state_dict['epoch']
 
+
 class MultiHeadTrainer(Trainer):
     def __init__(self, model, train_datasets, val_dataset, test_dataset, args):
         self.device = args.device
@@ -310,17 +317,29 @@ class MultiHeadTrainer(Trainer):
         self.workspace = args.workspace
         self.model = model
 
-        self.loss_fns = [nn.CrossEntropyLoss(weight=lb_weights.to(self.device)) for lb_weights in train_datasets.get_label_weights()]
+        self.loss_fns = [nn.CrossEntropyLoss(weight=lb_weights.to(
+            self.device)) for lb_weights in train_datasets.get_label_weights()]
+        self.lambdas = list(map(float, args.lambdas.split(',')))
+
+        assert len(self.lambdas) == len(
+            self.loss_fns), "Number of loss functions should be the same with the number of lambdas."
+        assert np.abs(
+            self.lambdas[0] - 1.) < 1e-8, "Lambda for the main dataset should be one."
+
+        self.num_heads = len(self.loss_fns)
 
         if args.two_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
-                                lr=args.lr_finetune, weight_decay=args.l2)
+                                   lr=args.lr_finetune, weight_decay=args.l2)
         else:
             self.optimizer = AdamW([
-                {'params':self.model.lm_model.parameters(), 'lr':args.lr_finetune, 'weight_decay':args.l2},
-                {'params':self.model.mlp_model.parameters(), 'lr':args.lr, 'weight_decay':args.l2}
+                {'params': self.model.lm_model.parameters(), 'lr': args.lr_finetune,
+                 'weight_decay': args.l2},
+                {'params': self.model.mlp_model.parameters(), 'lr': args.lr,
+                 'weight_decay': args.l2}
             ])
-            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(args.lr_finetune, args.lr))
+            print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(
+                args.lr_finetune, args.lr))
 
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
@@ -341,11 +360,18 @@ class MultiHeadTrainer(Trainer):
         self.best_roc = 0.
 
     def compute_loss(self, labels, logits):
-        return self.loss_fn(logits, labels)
+        loss = self.loss_fns[0](
+            logits[0],
+            labels[0]
+        )
 
-    def compute_metrics(self, labels, logits):
-        # return roc_auc_score(labels, logits[:, 1])  # temp
-        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')  # temp
+        for head_idx in range(1, self.num_heads):
+            loss = loss + self.loss_fns[head_idx](
+                logits[head_idx],
+                labels[head_idx]
+            ) * self.lambdas[head_idx]
+            
+        return loss
 
     def train_one_epoch(self):
         total_loss = 0.
@@ -354,31 +380,48 @@ class MultiHeadTrainer(Trainer):
         num_batches = (len(self.train_dataloader) // self.batch_size) + 1
         for _ in range(num_batches):
             count = 0
-            preds, labels = list(), list()
+            preds = [[] for _ in range(self.num_heads)]
+            labels = [[] for _ in range(self.num_heads)]
 
             if self.early_fuse or self.context_only:
                 for instances in self.train_dataloader:
-                    fused_context, label
-                    preds.append(self.model(fused_context))
-                    labels.append(label)
+                    for head_idx, instance in enumerate(instances):
+                        fused_context, label = instance
+                        preds[head_idx].append(
+                            self.model(
+                                head_idx,
+                                fused_context
+                            )
+                        )
+                        labels[head_idx].append(label)
                     count += 1
 
                     if count == self.batch_size:
                         count = 0
                         break
             else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in self.train_dataloader:
-                    preds.append(self.model(cited_title, cited_abstract,
-                                 citing_title, citing_abstract, citation_context))
-                    labels.append(label)
+                for instances in self.train_dataloader:
+                    for head_idx, instance in enumerate(instances):
+                        cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label = instance
+                        preds[head_idx].append(
+                            self.model(
+                                head_idx,
+                                cited_title,
+                                cited_abstract,
+                                citing_title,
+                                citing_abstract,
+                                citation_context
+                            )
+                        )
+                        labels[head_idx].append(label)
                     count += 1
 
                     if count == self.batch_size:
                         count = 0
                         break
 
-            preds = torch.cat(preds, dim=0)
-            labels = torch.LongTensor(labels).to(self.device)
+            preds = [torch.cat(p, dim=0) for p in preds]
+            labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
 
             loss = self.compute_loss(labels, preds)
 
@@ -402,11 +445,11 @@ class MultiHeadTrainer(Trainer):
             if self.early_fuse or self.context_only:
                 for fused_context, label in data_loader:
                     preds.append(self.model(
-                        fused_context).detach().cpu().numpy())
+                        0, fused_context).detach().cpu().numpy())
                     labels.append(label)
             else:
                 for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
-                    preds.append(self.model(cited_title, cited_abstract, citing_title,
+                    preds.append(self.model(0, cited_title, cited_abstract, citing_title,
                                  citing_abstract, citation_context).detach().cpu().numpy())
                     labels.append(label)
 
