@@ -311,7 +311,7 @@ class MultiHeadTrainer(Trainer):
     def __init__(self, model, train_datasets, val_dataset, test_dataset, args):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
-        self.num_epochs = args.num_epochs
+        self.num_epochs = args.num_epochs_finetune
         self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
         self.context_only = args.context_only
         self.tol = args.tol
@@ -343,10 +343,19 @@ class MultiHeadTrainer(Trainer):
             print('Setting different learning rates to {:.4f} for LM and {:.4f} for MLP.'.format(
                 args.lr_finetune, args.lr))
 
-        self.scheduler = lr_scheduler.StepLR(
-            self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
-
-        # self.scheduler = get_linear_scheduler(self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune)
+        if args.scheduler == 'exp':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
+        elif args.scheduler == 'slanted':
+            self.scheduler = get_slanted_triangular_scheduler(
+                self.optimizer, num_epochs=self.num_epochs)
+        elif args.scheduler == 'linear':
+            self.scheduler = get_linear_scheduler(
+                self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune, final_lr=args.lr_finetune/32)
+        else:
+            raise ValueError(
+                'Scheduler {} not implemented.'.format(args.scheduler))
+        print('Using {} scheduler.'.format(args.scheduler))
 
         self.train_dataloader = DataLoader(
             train_datasets, batch_size=1, shuffle=True)

@@ -16,20 +16,22 @@ do
                 --data_dir=../../../Data/ \
                 --aux_datasets=${aux_dataset} \
                 --lr_finetune=${lr} \
-                --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_twostep_bruteforce_seed42 \
+                --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42 \
                 --lambdas=1.0,0.1 \
+                --scheduler=slanted \
                 --fuse_type=bruteforce \
                 --two_step \
-                --seed=42 &> main${main_dataset}_aux${aux_dataset}_twostep_bruteforce_seed42_log.txt
+                --seed=42 &> main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42_log.txt
         else
             python ../main.py \
                 --dataset=${main_dataset} \
                 --data_dir=../../../Data/ \
-                --workspace=../Workspaces/main${main_dataset}_twostep_bruteforce_seed42 \
+                --workspace=../Workspaces/main${main_dataset}_twostep_slanted_bruteforce_seed42 \
                 --lr_finetune=${lr} \
+                --scheduler=slanted \
                 --fuse_type=bruteforce \
                 --two_step \
-                --seed=42 &> main${main_dataset}_twostep_bruteforce_seed42_log.txt
+                --seed=42 &> main${main_dataset}_twostep_slanted_bruteforce_seed42_log.txt
         fi
     done
 done
