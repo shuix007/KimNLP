@@ -18,6 +18,7 @@ do
                 --lr_finetune=${lr} \
                 --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42 \
                 --lambdas=1.0,0.1 \
+                --num_epochs_finetune=15 \
                 --scheduler=slanted \
                 --fuse_type=bruteforce \
                 --two_step \
@@ -28,6 +29,7 @@ do
                 --data_dir=../../../Data/ \
                 --workspace=../Workspaces/main${main_dataset}_twostep_slanted_bruteforce_seed42 \
                 --lr_finetune=${lr} \
+                --num_epochs_finetune=15 \
                 --scheduler=slanted \
                 --fuse_type=bruteforce \
                 --two_step \

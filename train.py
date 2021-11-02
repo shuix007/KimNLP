@@ -153,7 +153,7 @@ class Trainer(object):
             return roc
 
     def train(self):
-        for epoch in range(1, self.num_epochs):
+        for epoch in range(1, self.num_epochs+1):
             start = time.time()
             loss = self.train_one_epoch()
             end_train = time.time()
