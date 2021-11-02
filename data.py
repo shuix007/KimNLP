@@ -23,7 +23,9 @@ class Dataset(object):
             self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
                 'input_ids'].squeeze()[:5]
         else:
-            self.cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
+            # self.cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
+            self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
+                'input_ids'].squeeze()[1:-1]
 
         self._load_data(annotated_data)
         if self.context_only:
