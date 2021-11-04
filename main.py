@@ -6,8 +6,8 @@ import numpy as np
 
 from Model import LanguageModel, EarlyFuseClassifier, EarlyFuseMLPClassifier, LateFuseClassifier, LateFuseMLPCLassifier, MultiHeadEarlyFuseClassifier, MultiHeadLateFuseClassifier, MultiHeadContextOnlyLateFuseClassifier
 from Model.model import ContextOnlyLateFuseClassifier
-from data import EmbeddedDataset, MultiHeadDatasets, create_data_channels, create_single_data_channels
-from train import Trainer, PreTrainer, MultiHeadTrainer
+from data import EmbeddedDataset, MultiHeadDatasets, SingleHeadDatasets, SingleHeadEmbeddedDatasets, create_data_channels
+from train import Trainer, PreTrainer, MultiHeadTrainer, SingleHeadTrainer, SingleHeadPreTrainer
 from utils import save_args, select_activation_fn
 
 # change the default cache dir so that huggingface won't take the cse space.
@@ -114,8 +114,8 @@ if __name__ == '__main__':
         token_val_data_list.append(aux_token_val_data)
         token_test_data_list.append(aux_token_test_data)
 
-    multihead_train_datasets = MultiHeadDatasets(token_train_data_list)
-    n_classes = [len(lb_weights) for lb_weights in multihead_train_datasets.get_label_weights()]
+    singlehead_train_datasets = SingleHeadDatasets(token_train_data_list)
+    n_classes = len(singlehead_train_datasets.get_label_weights())
 
     lm_model = LanguageModel(
         modelname=modelname,
@@ -125,105 +125,97 @@ if __name__ == '__main__':
         intra_context_pooling=args.intra_context_pooling
     ).to(args.device)
 
-    mlp_models = list()
     if args.context_only:
         if args.fuse_type in ['disttrunc', 'bruteforce']:
-            for n_cls in n_classes:
-                mlp_model = EarlyFuseMLPClassifier(
-                    input_dims=lm_model.hidden_size,
-                    hidden_list=hidden_dims,
-                    n_classes=n_cls,
-                    activation=select_activation_fn(args.activation_fn),
-                    dropout=args.dropout_rate,
-                    device=args.device
-                ).to(args.device)
-                mlp_models.append(mlp_model)
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-            model = MultiHeadEarlyFuseClassifier(
+            model = EarlyFuseClassifier(
                 lm_model=lm_model,
-                mlp_models=mlp_models
+                mlp_model=mlp_model
             )
         else:
-            for n_cls in n_classes:
-                mlp_model = EarlyFuseMLPClassifier(
-                    input_dims=lm_model.hidden_size,
-                    hidden_list=hidden_dims,
-                    n_classes=n_cls,
-                    activation=select_activation_fn(args.activation_fn),
-                    dropout=args.dropout_rate,
-                    device=args.device
-                ).to(args.device)
-                mlp_models.append(mlp_model)
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-            model = MultiHeadContextOnlyLateFuseClassifier(
+            model = ContextOnlyLateFuseClassifier(
                 lm_model=lm_model,
-                mlp_models=mlp_models,
+                mlp_model=mlp_model,
                 inter_context_pooling=args.inter_context_pooling
             )
     else:
         if args.fuse_type in ['disttrunc', 'bruteforce']:
-            for n_cls in n_classes:
-                mlp_model = EarlyFuseMLPClassifier(
-                    input_dims=lm_model.hidden_size,
-                    hidden_list=hidden_dims,
-                    n_classes=n_cls,
-                    activation=select_activation_fn(args.activation_fn),
-                    dropout=args.dropout_rate,
-                    device=args.device
-                ).to(args.device)
-                mlp_models.append(mlp_model)
+            mlp_model = EarlyFuseMLPClassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-            model = MultiHeadEarlyFuseClassifier(
+            model = EarlyFuseClassifier(
                 lm_model=lm_model,
-                mlp_models=mlp_models
+                mlp_model=mlp_model
             )
         else:
-            for n_cls in n_classes:
-                mlp_model = LateFuseMLPCLassifier(
-                    input_dims=lm_model.hidden_size,
-                    hidden_list=hidden_dims,
-                    n_classes=n_cls,
-                    activation=select_activation_fn(args.activation_fn),
-                    dropout=args.dropout_rate,
-                    device=args.device
-                ).to(args.device)
-                mlp_models.append(mlp_model)
+            mlp_model = LateFuseMLPCLassifier(
+                input_dims=lm_model.hidden_size,
+                hidden_list=hidden_dims,
+                n_classes=n_classes,
+                activation=select_activation_fn(args.activation_fn),
+                dropout=args.dropout_rate,
+                device=args.device
+            ).to(args.device)
 
-            model = MultiHeadLateFuseClassifier(
+            model = LateFuseClassifier(
                 lm_model=lm_model,
-                mlp_models=mlp_models,
+                mlp_model=mlp_model,
                 inter_context_pooling=args.inter_context_pooling
             )
 
     if not args.inference_only:
         # warmup each head
         if args.two_step:
-            for head_idx in range(len(n_classes)):
+            tensor_train_data_list = list()
+            for head_idx in range(len(token_train_data_list)):
                 tensor_train_data = EmbeddedDataset(
                     token_train_data_list[head_idx], lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
-                tensor_val_data = EmbeddedDataset(
-                    token_val_data_list[head_idx], lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
-                tensor_test_data = EmbeddedDataset(
-                    token_test_data_list[head_idx], lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+                tensor_train_data_list.append(tensor_train_data)
+            singlehead_tensor_train_data = SingleHeadEmbeddedDatasets(tensor_train_data_list)
 
-                mlp_trainer = PreTrainer(
-                    mlp_models[head_idx],
-                    tensor_train_data,
-                    tensor_val_data,
-                    tensor_test_data,
-                    args
-                )
-                print('Pretraining MLP for the {}-th head.'.format(head_idx))
-                mlp_trainer.train()
-                mlp_trainer.load_model()
-                mlp_trainer.test()
+            tensor_val_data = EmbeddedDataset(token_val_data, lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+            tensor_test_data = EmbeddedDataset(token_test_data, lm_model, args.fuse_type, args.context_only, inter_context_pooling=args.inter_context_pooling)
+            mlp_trainer = SingleHeadPreTrainer(
+                mlp_model,
+                singlehead_tensor_train_data,
+                tensor_val_data,
+                tensor_test_data,
+                args
+            )
+            print('Pretraining MLP.')
+            mlp_trainer.train()
+            mlp_trainer.load_model()
+            mlp_trainer.test()
 
         if args.da:
             token_train_data.data_augmentation()
 
-        finetuner = MultiHeadTrainer(
+        finetuner = SingleHeadTrainer(
             model,
-            multihead_train_datasets,
+            singlehead_train_datasets,
             token_val_data,
             token_test_data,
             args
@@ -233,9 +225,9 @@ if __name__ == '__main__':
         finetuner.load_model()
         finetuner.test()
     else:
-        finetuner = MultiHeadTrainer(
+        finetuner = SingleHeadTrainer(
             model,
-            multihead_train_datasets,
+            singlehead_train_datasets,
             token_val_data,
             token_test_data,
             args

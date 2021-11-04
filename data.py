@@ -48,30 +48,30 @@ class Dataset(object):
         '''Get datapoint with index'''
         if self.context_only:
             if self.early_fuse:
-                return (
+                return [
                     self.fused_citation_context_tokens[idx],
                     self.labels[idx]
-                )
+                ]
             else:
-                return (
+                return [
                     self.citation_context_tokens[idx],
                     self.labels[idx]
-                )
+                ]
         else:
             if self.early_fuse:
-                return (
+                return [
                     self.fused_text_tokens[idx],
                     self.labels[idx]
-                )
+                ]
             else:
-                return (
+                return [
                     self.cited_title_tokens[idx],
                     self.cited_abstract_tokens[idx],
                     self.citing_title_tokens[idx],
                     self.citing_abstract_tokens[idx],
                     self.citation_context_tokens[idx],
                     self.labels[idx]
-                )
+                ]
 
     def __iter__(self):
         return self
@@ -448,7 +448,7 @@ class EmbeddedDataset(object):
         labels, counts = torch.unique(self.labels, return_counts=True)
 
         label_weights = torch.zeros_like(counts, dtype=torch.float32)
-        label_weights[labels] = counts.max() / counts
+        label_weights = counts.max() / counts
 
         return label_weights
 
@@ -458,30 +458,30 @@ class EmbeddedDataset(object):
     def __getitem__(self, idx):
         if self.context_only:
             if self.early_fuse:
-                return (
+                return [
                     self.fused_context_embeds[idx],
                     self.labels[idx]
-                )
+                ]
             else:
-                return (
+                return [
                     self.citation_context_embeds[idx],
                     self.labels[idx]
-                )
+                ]
         else:
             if self.early_fuse:
-                return (
+                return [
                     self.fused_context_embeds[idx],
                     self.labels[idx]
-                )
+                ]
             else:
-                return (
+                return [
                     self.cited_title_embeds[idx],
                     self.cited_abstract_embeds[idx],
                     self.citing_title_embeds[idx],
                     self.citing_abstract_embeds[idx],
                     self.citation_context_embeds[idx],
                     self.labels[idx]
-                )
+                ]
 
     def _compute_fused_embeddings(self, dataset, model):
         self.fused_context_embeds = list()
@@ -614,6 +614,141 @@ class MultiHeadDatasets(object):
         return [d.get_label_weights() for d in self.datasets]
 
 
+class SingleHeadDatasets(object):
+    def __init__(self, datasets, p=None):
+        self.datasets = datasets
+        self.p = p if p is not None else np.full(len(self.datasets), 1. / len(
+            self.datasets), dtype=np.float32)  # sample probability for the datasets
+
+        self.lengths = np.array([len(dataset) for dataset in self.datasets])
+        self.total_length = np.sum(self.lengths)
+        self.main_length = self.lengths[0]
+
+        self._compute_label_weights()
+
+        self._index = -1
+        self._data_index = 0
+
+    def _compute_label_weights(self):
+        ''' Compute the weights of the labels
+        '''
+        self.num_labels = np.cumsum(
+            [0] + [len(d.get_label_weights()) for d in self.datasets])
+        labels = torch.cat([d.labels + self.num_labels[i]
+                           for i, d in enumerate(self.datasets)])
+
+        labels, counts = torch.unique(labels, return_counts=True)
+
+        self.label_weights = torch.zeros_like(counts, dtype=torch.float32)
+        self.label_weights[labels] = counts.max() / counts
+
+    def __len__(self):
+        return self.lengths[0]
+
+    def __getitem__(self, idx):
+        indices = self._get_indices(idx)
+
+        instances = [d.__getitem__(indices[i])
+                     for i, d in enumerate(self.datasets)]
+        for i in range(len(instances)):
+            instances[i][-1] = instances[i][-1] + \
+                self.num_labels[i]  # map the labels
+
+        return instances
+
+    def _get_indices(self, idx):
+        indices = list()
+        for i, l in enumerate(self.lengths):
+            if l < self.main_length:
+                indices.append(int((idx / self.main_length) * l))
+            elif l > self.main_length:
+                portion = l / self.main_length
+                idx_low, idx_high = int(idx*portion), int((idx+1)*portion)
+                indices.append(np.random.randint(idx_low, idx_high))
+            else:
+                indices.append(idx)
+        return indices
+
+    def get_label_weights(self):
+        return self.label_weights
+
+    def get_main_label_indices(self):
+        return np.arange(self.num_labels[1])
+
+
+class SingleHeadEmbeddedDatasets(object):
+    def __init__(self, datasets, p=None):
+        self.datasets = datasets
+        self.p = p if p is not None else np.full(len(self.datasets), 1. / len(
+            self.datasets), dtype=np.float32)  # sample probability for the datasets
+
+        self.lengths = np.array([len(dataset) for dataset in self.datasets])
+        self.cumsum_length = np.cumsum(self.lengths)
+        self.total_length = np.sum(self.lengths)
+        self.main_length = self.lengths[0]
+
+        self._compute_label_weights()
+
+        self._index = -1
+        self._data_index = 0
+
+    def _compute_label_weights(self):
+        ''' Compute the weights of the labels
+        '''
+        self.num_labels = np.cumsum(
+            [0] + [len(d.get_label_weights()) for d in self.datasets])
+        labels = torch.cat([d.labels + self.num_labels[i]
+                           for i, d in enumerate(self.datasets)])
+
+        labels, counts = torch.unique(labels, return_counts=True)
+
+        self.label_weights = torch.zeros_like(counts, dtype=torch.float32)
+        self.label_weights[labels] = counts.max() / counts
+
+    def __len__(self):
+        return self.total_length
+
+    def __getitem__(self, idx):
+        data_idx = 0
+        actual_idx = idx
+
+        for i in range(len(self.cumsum_length) - 1):
+            if idx >= self.cumsum_length[i] and idx < self.cumsum_length[i+1]:
+                data_idx = i + 1
+                actual_idx = idx % self.cumsum_length[i]
+        
+        return self.datasets[data_idx].__getitem__(actual_idx)
+
+        # indices = self._get_indices(idx)
+
+        # instances = [d.__getitem__(indices[i])
+        #              for i, d in enumerate(self.datasets)]
+        # for i in range(len(instances)):
+        #     instances[i][-1] = instances[i][-1] + \
+        #         self.num_labels[i]  # map the labels
+
+        # return instances
+
+    def _get_indices(self, idx):
+        indices = list()
+        for i, l in enumerate(self.lengths):
+            if l < self.main_length:
+                indices.append(int((idx / self.main_length) * l))
+            elif l > self.main_length:
+                portion = l / self.main_length
+                idx_low, idx_high = int(idx*portion), int((idx+1)*portion)
+                indices.append(np.random.randint(idx_low, idx_high))
+            else:
+                indices.append(idx)
+        return indices
+
+    def get_label_weights(self):
+        return self.label_weights
+
+    def get_main_label_indices(self):
+        return np.arange(self.num_labels[1])
+
+
 def create_data_channels(filename, modelname, split_ratios, fuse_type, context_only, max_length, da_alpha, da_n):
     assert np.abs(np.sum(split_ratios) -
                   1.) < 1e-8, 'The split ratios must sum to 1 instead of {}'.format(np.sum(split_ratios))
@@ -713,7 +848,7 @@ def create_single_data_channels(filename, modelname, fuse_type, context_only, ma
         else:
             label = str(annotated_data['new annotation'][i]).strip().lower()
 
-        if label in ['used', 'not used', 'extended', 'background', 'result', 'method']:
+        if label in ['used', 'not used', 'extended', 'background', 'result', 'method', 'background', 'uses', 'compareorcontrast', 'motivation', 'future', 'extends']:
             valid_index[i] = True
             annotated_labels.append(label)
         else:
