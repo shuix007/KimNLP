@@ -719,16 +719,6 @@ class SingleHeadEmbeddedDatasets(object):
         
         return self.datasets[data_idx].__getitem__(actual_idx)
 
-        # indices = self._get_indices(idx)
-
-        # instances = [d.__getitem__(indices[i])
-        #              for i, d in enumerate(self.datasets)]
-        # for i in range(len(instances)):
-        #     instances[i][-1] = instances[i][-1] + \
-        #         self.num_labels[i]  # map the labels
-
-        # return instances
-
     def _get_indices(self, idx):
         indices = list()
         for i, l in enumerate(self.lengths):
