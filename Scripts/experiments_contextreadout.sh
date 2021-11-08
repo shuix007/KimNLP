@@ -2,41 +2,24 @@
 
 # SEED=42
 
+lr=2e-5
+
 for SEED in 42 3515 4520
 do
     for main_dataset in "kim" "acl" "scicite"
     do
-        for aux_dataset in "kim" "acl" "scicite"
+        for readout in "cls" "mean" "ch"
         do
-            if [ "${main_dataset}" == "acl" ]; then
-                lr=2e-5
-            else
-                lr=2e-5
-            fi
-
-            if [ "${main_dataset}" != "${aux_dataset}" ]; then
-                python ../main.py \
-                    --dataset=${main_dataset} \
-                    --data_dir=../../../Data/ \
-                    --aux_datasets=${aux_dataset} \
-                    --lr_finetune=${lr} \
-                    --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_bruteforce_seed${SEED} \
-                    --lambdas=1.0,0.1 \
-                    --num_epochs_finetune=15 \
-                    --scheduler=slanted \
-                    --fuse_type=bruteforce \
-                    --seed=${SEED} &> main${main_dataset}_aux${aux_dataset}_bruteforce_seed${SEED}_log.txt
-            else
-                python ../main.py \
-                    --dataset=${main_dataset} \
-                    --data_dir=../../../Data/ \
-                    --workspace=../Workspaces/main${main_dataset}_bruteforce_seed${SEED} \
-                    --lr_finetune=${lr} \
-                    --num_epochs_finetune=15 \
-                    --scheduler=slanted \
-                    --fuse_type=bruteforce \
-                    --seed=${SEED} &> main${main_dataset}_bruteforce_seed${SEED}_log.txt
-            fi
+            python ../main.py \
+                --dataset=${main_dataset} \
+                --data_dir=../../../Data/ \
+                --workspace=../Workspaces/main${main_dataset}_bruteforce_${readout}_seed${SEED}_l20_10epochs \
+                --lr_finetune=${lr} \
+                --num_epochs_finetune=10 \
+                --scheduler=slanted \
+                --fuse_type=bruteforce \
+                --context_readout=${readout} \
+                --seed=${SEED} &> main${main_dataset}_bruteforce_${readout}_seed${SEED}_l20_10epochs_log.txt
         done
     done
 done

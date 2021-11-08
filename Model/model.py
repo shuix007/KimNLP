@@ -69,58 +69,49 @@ class LanguageModel(nn.Module):
         self.model.save_pretrained(modeldir)
 
 
-class EarlyFuseMLPClassifier(nn.Module):
+# class MLPClassifier(nn.Module):
+#     def __init__(self, input_dims, hidden_list, n_classes, activation, dropout, device):
+#         super(MLPClassifier, self).__init__()
+#         self.device = device
+#         self.n_classes = n_classes
+#         self.n_layers = len(hidden_list)
+#         self.hidden_layers = nn.ModuleList([])
+#         input_ = input_dims
+#         for i in range(len(hidden_list)):
+#             self.hidden_layers.append(DenseLayer(
+#                 input_, hidden_list[i], activation=activation, bias=True))
+#             input_ = hidden_list[i]
+#         self.top_layer = DenseLayer(hidden_list[-1], n_classes)
+#         self.dropout = nn.Dropout(dropout)
+
+#     def forward(self, fused_context_embeds):
+#         hidden = fused_context_embeds.to(self.device)
+#         for layer in self.hidden_layers:
+#             hidden = self.dropout(layer(hidden))
+#         logits = self.top_layer(hidden)
+#         return logits
+
+class MLPClassifier(nn.Module):
     def __init__(self, input_dims, hidden_list, n_classes, activation, dropout, device):
-        super(EarlyFuseMLPClassifier, self).__init__()
+        super(MLPClassifier, self).__init__()
         self.device = device
         self.n_classes = n_classes
-        self.n_layers = len(hidden_list)
-        self.hidden_layers = nn.ModuleList([])
-        input_ = input_dims
-        for i in range(len(hidden_list)):
-            self.hidden_layers.append(DenseLayer(
-                input_, hidden_list[i], activation=activation, bias=True))
-            input_ = hidden_list[i]
-        self.top_layer = DenseLayer(hidden_list[-1], n_classes)
-        self.dropout = nn.Dropout(dropout)
+        # self.n_layers = len(hidden_list)
+        # self.hidden_layers = nn.ModuleList([])
+        # input_ = input_dims
+        # for i in range(len(hidden_list)):
+        #     self.hidden_layers.append(DenseLayer(
+        #         input_, hidden_list[i], activation=activation, bias=True))
+        #     input_ = hidden_list[i]
+        self.top_layer = DenseLayer(input_dims, n_classes)
+        # self.dropout = nn.Dropout(dropout)
 
     def forward(self, fused_context_embeds):
         hidden = fused_context_embeds.to(self.device)
-        for layer in self.hidden_layers:
-            hidden = self.dropout(layer(hidden))
+        # for layer in self.hidden_layers:
+        #     hidden = self.dropout(layer(hidden))
         logits = self.top_layer(hidden)
         return logits
-
-
-class LateFuseMLPCLassifier(nn.Module):
-    def __init__(self, input_dims, hidden_list, n_classes, activation, dropout, device):
-        super(LateFuseMLPCLassifier, self).__init__()
-        self.device = device
-        self.n_classes = n_classes
-        self.n_layers = len(hidden_list)
-        self.hidden_layers = nn.ModuleList()
-        input_ = input_dims * 5
-        for i in range(len(hidden_list)):
-            self.hidden_layers.append(DenseLayer(
-                input_, hidden_list[i], activation=activation, bias=True))
-            input_ = hidden_list[i]
-        self.top_layer = DenseLayer(hidden_list[-1], n_classes)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, cited_title_embeds, cited_abstract_embeds, citing_title_embeds, citing_abstract_embeds, citation_context_embeds):
-        hidden = torch.cat([
-            cited_title_embeds.to(self.device),
-            cited_abstract_embeds.to(self.device),
-            citing_title_embeds.to(self.device),
-            citing_abstract_embeds.to(self.device),
-            citation_context_embeds.to(self.device)
-        ], dim=-1)
-
-        for layer in self.hidden_layers:
-            hidden = self.dropout(layer(hidden))
-        logits = self.top_layer(hidden)
-        return logits
-
 
 class EarlyFuseClassifier(nn.Module):
     def __init__(self, lm_model, mlp_model):
@@ -138,51 +129,6 @@ class EarlyFuseClassifier(nn.Module):
 class LateFuseClassifier(nn.Module):
     def __init__(self, lm_model, mlp_model, inter_context_pooling):
         super(LateFuseClassifier, self).__init__()
-        self.lm_model = lm_model
-        self.mlp_model = mlp_model
-
-        self.inter_context_pooling = inter_context_pooling
-        assert self.inter_context_pooling in [
-            'sum', 'max', 'mean', 'topk'], 'Inter context pooling type {} not supported'.format(self.inter_context_pooling)
-
-    def forward(self, cited_title_tokens, cited_abstract_tokens, citing_title_tokens, citing_abstract_tokens, citation_context_tokens):
-        cited_title_embeds = self.lm_model(cited_title_tokens)
-        cited_abstract_embeds = self.lm_model(cited_abstract_tokens)
-        citing_title_embeds = self.lm_model(citing_title_tokens)
-        citing_abstract_embeds = self.lm_model(citing_abstract_tokens)
-
-        citation_context_embeds = list()
-        for context in citation_context_tokens:
-            context_embed = self.lm_model.context_forward(context)
-            citation_context_embeds.append(context_embed)
-        citation_context_embeds = torch.stack(citation_context_embeds)
-
-        if self.inter_context_pooling == 'sum':
-            citation_context_embeds = citation_context_embeds.sum(
-                dim=0)
-        elif self.inter_context_pooling == 'max':
-            citation_context_embeds = citation_context_embeds.max(
-                dim=0).values
-        elif self.inter_context_pooling == 'mean':
-            citation_context_embeds = citation_context_embeds.mean(
-                dim=0)
-        elif self.inter_context_pooling == 'topk':
-            topk = citation_context_embeds.topk(10, dim=0)
-            citation_context_embeds = topk[0].mean(dim=0)
-
-        logits = self.mlp_model(
-            cited_title_embeds.unsqueeze(0),
-            cited_abstract_embeds.unsqueeze(0),
-            citing_title_embeds.unsqueeze(0),
-            citing_abstract_embeds.unsqueeze(0),
-            citation_context_embeds.unsqueeze(0)
-        )
-        return logits
-
-
-class ContextOnlyLateFuseClassifier(nn.Module):
-    def __init__(self, lm_model, mlp_model, inter_context_pooling):
-        super(ContextOnlyLateFuseClassifier, self).__init__()
         self.lm_model = lm_model
         self.mlp_model = mlp_model
 

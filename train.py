@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from scipy.special import softmax
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, f1_score
 from scheduler import get_slanted_triangular_scheduler, get_linear_scheduler
 
 
@@ -18,8 +18,7 @@ class Trainer(object):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs_finetune
-        self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
-        self.context_only = args.context_only
+        self.early_fuse = args.fuse_type in ['bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -28,7 +27,7 @@ class Trainer(object):
         self.loss_fn = nn.CrossEntropyLoss(
             weight=train_dataset.get_label_weights().to(self.device))
 
-        if args.two_step or not args.diff_lr:
+        if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
                                    lr=args.lr_finetune, weight_decay=args.l2)
         else:
@@ -74,7 +73,8 @@ class Trainer(object):
     def compute_metrics(self, labels, logits):
         # return roc_auc_score(labels, logits[:, 1])  # temp
         # temp
-        return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')
+        return f1_score(labels, logits.argmax(axis=1), average='macro')
+        # return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')
 
     def early_stop(self, roc, epoch):
         if roc > self.best_roc:
@@ -93,25 +93,14 @@ class Trainer(object):
             count = 0
             preds, labels = list(), list()
 
-            if self.early_fuse or self.context_only:
-                for fused_context, label in self.train_dataloader:
-                    preds.append(self.model(fused_context))
-                    labels.append(label)
-                    count += 1
+            for fused_context, label in self.train_dataloader:
+                preds.append(self.model(fused_context))
+                labels.append(label)
+                count += 1
 
-                    if count == self.batch_size:
-                        count = 0
-                        break
-            else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in self.train_dataloader:
-                    preds.append(self.model(cited_title, cited_abstract,
-                                 citing_title, citing_abstract, citation_context))
-                    labels.append(label)
-                    count += 1
-
-                    if count == self.batch_size:
-                        count = 0
-                        break
+                if count == self.batch_size:
+                    count = 0
+                    break
 
             preds = torch.cat(preds, dim=0)
             labels = torch.LongTensor(labels).to(self.device)
@@ -135,16 +124,10 @@ class Trainer(object):
 
         preds, labels = list(), list()
         with torch.no_grad():
-            if self.early_fuse or self.context_only:
-                for fused_context, label in data_loader:
-                    preds.append(self.model(
-                        fused_context).detach().cpu().numpy())
-                    labels.append(label)
-            else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
-                    preds.append(self.model(cited_title, cited_abstract, citing_title,
-                                 citing_abstract, citation_context).detach().cpu().numpy())
-                    labels.append(label)
+            for fused_context, label in data_loader:
+                preds.append(self.model(
+                    fused_context).detach().cpu().numpy())
+                labels.append(label)
 
             preds = np.concatenate(preds, axis=0)
             labels = torch.cat(labels, dim=0).numpy()
@@ -218,8 +201,7 @@ class PreTrainer(Trainer):
         self.device = args.device
         self.batch_size = args.batch_size
         self.num_epochs = args.num_epochs
-        self.early_fuse = args.fuse_type in ['disttrunc', 'bruteforce']
-        self.context_only = args.context_only
+        self.early_fuse = args.fuse_type in ['bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -250,34 +232,16 @@ class PreTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        if self.early_fuse or self.context_only:
-            for fused_context, labels in self.train_dataloader:
-                preds = self.model(fused_context)
-                labels = torch.LongTensor(labels).to(self.device)
+        for fused_context, labels in self.train_dataloader:
+            preds = self.model(fused_context)
+            labels = torch.LongTensor(labels).to(self.device)
 
-                loss = self.compute_loss(labels, preds)
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
+            loss = self.compute_loss(labels, preds)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-                total_loss += loss.item()
-        else:
-            for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, labels in self.train_dataloader:
-                preds = self.model(
-                    cited_title,
-                    cited_abstract,
-                    citing_title,
-                    citing_abstract,
-                    citation_context
-                )
-                labels = torch.LongTensor(labels).to(self.device)
-                loss = self.compute_loss(labels, preds)
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-
-                total_loss += loss.item()
+            total_loss += loss.item()
 
         return total_loss / len(self.train_dataloader)
 
@@ -312,8 +276,7 @@ class MultiHeadTrainer(Trainer):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs_finetune
-        self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
-        self.context_only = args.context_only
+        self.early_fuse = args.fuse_type in ['bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -330,7 +293,7 @@ class MultiHeadTrainer(Trainer):
 
         self.num_heads = len(self.loss_fns)
 
-        if args.two_step or not args.diff_lr:
+        if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
                                    lr=args.lr_finetune, weight_decay=args.l2)
         else:
@@ -394,42 +357,21 @@ class MultiHeadTrainer(Trainer):
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            if self.early_fuse or self.context_only:
-                for instances in self.train_dataloader:
-                    for head_idx, instance in enumerate(instances):
-                        fused_context, label = instance
-                        preds[head_idx].append(
-                            self.model(
-                                head_idx,
-                                fused_context
-                            )
+            for instances in self.train_dataloader:
+                for head_idx, instance in enumerate(instances):
+                    fused_context, label = instance
+                    preds[head_idx].append(
+                        self.model(
+                            head_idx,
+                            fused_context
                         )
-                        labels[head_idx].append(label)
-                    count += 1
+                    )
+                    labels[head_idx].append(label)
+                count += 1
 
-                    if count == self.batch_size:
-                        count = 0
-                        break
-            else:
-                for instances in self.train_dataloader:
-                    for head_idx, instance in enumerate(instances):
-                        cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label = instance
-                        preds[head_idx].append(
-                            self.model(
-                                head_idx,
-                                cited_title,
-                                cited_abstract,
-                                citing_title,
-                                citing_abstract,
-                                citation_context
-                            )
-                        )
-                        labels[head_idx].append(label)
-                    count += 1
-
-                    if count == self.batch_size:
-                        count = 0
-                        break
+                if count == self.batch_size:
+                    count = 0
+                    break
 
             preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
@@ -453,16 +395,10 @@ class MultiHeadTrainer(Trainer):
 
         preds, labels = list(), list()
         with torch.no_grad():
-            if self.early_fuse or self.context_only:
-                for fused_context, label in data_loader:
-                    preds.append(self.model(
-                        0, fused_context).detach().cpu().numpy())
-                    labels.append(label)
-            else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
-                    preds.append(self.model(0, cited_title, cited_abstract, citing_title,
-                                 citing_abstract, citation_context).detach().cpu().numpy())
-                    labels.append(label)
+            for fused_context, label in data_loader:
+                preds.append(self.model(
+                    0, fused_context).detach().cpu().numpy())
+                labels.append(label)
 
             preds = np.concatenate(preds, axis=0)
             labels = torch.cat(labels, dim=0).numpy()
@@ -476,8 +412,7 @@ class SingleHeadTrainer(Trainer):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs_finetune
-        self.early_fuse = args.fuse_type in ['bruteforce', 'disttrunc']
-        self.context_only = args.context_only
+        self.early_fuse = args.fuse_type in ['bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -495,7 +430,7 @@ class SingleHeadTrainer(Trainer):
         self.num_heads = len(self.lambdas)
         self.main_label_indices = train_datasets.get_main_label_indices()
 
-        if args.two_step or not args.diff_lr:
+        if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
                                    lr=args.lr_finetune, weight_decay=args.l2)
         else:
@@ -559,36 +494,16 @@ class SingleHeadTrainer(Trainer):
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            if self.early_fuse or self.context_only:
-                for instances in self.train_dataloader:
-                    for head_idx, instance in enumerate(instances):
-                        fused_context, label = instance
-                        preds[head_idx].append(self.model(fused_context))
-                        labels[head_idx].append(label)
-                    count += 1
+            for instances in self.train_dataloader:
+                for head_idx, instance in enumerate(instances):
+                    fused_context, label = instance
+                    preds[head_idx].append(self.model(fused_context))
+                    labels[head_idx].append(label)
+                count += 1
 
-                    if count == self.batch_size:
-                        count = 0
-                        break
-            else:
-                for instances in self.train_dataloader:
-                    for head_idx, instance in enumerate(instances):
-                        cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label = instance
-                        preds[head_idx].append(
-                            self.model(
-                                cited_title,
-                                cited_abstract,
-                                citing_title,
-                                citing_abstract,
-                                citation_context
-                            )
-                        )
-                        labels[head_idx].append(label)
-                    count += 1
-
-                    if count == self.batch_size:
-                        count = 0
-                        break
+                if count == self.batch_size:
+                    count = 0
+                    break
 
             preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
@@ -612,16 +527,10 @@ class SingleHeadTrainer(Trainer):
 
         preds, labels = list(), list()
         with torch.no_grad():
-            if self.early_fuse or self.context_only:
-                for fused_context, label in data_loader:
-                    preds.append(self.model(
-                        fused_context).detach().cpu().numpy())
-                    labels.append(label)
-            else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
-                    preds.append(self.model(cited_title, cited_abstract, citing_title,
-                                 citing_abstract, citation_context).detach().cpu().numpy())
-                    labels.append(label)
+            for fused_context, label in data_loader:
+                preds.append(self.model(
+                    fused_context).detach().cpu().numpy())
+                labels.append(label)
 
             preds = np.concatenate(preds, axis=0)[:, self.main_label_indices]
             labels = torch.cat(labels, dim=0).numpy()
@@ -635,8 +544,7 @@ class SingleHeadPreTrainer(Trainer):
         self.device = args.device
         self.batch_size = args.batch_size
         self.num_epochs = args.num_epochs
-        self.early_fuse = args.fuse_type in ['disttrunc', 'bruteforce']
-        self.context_only = args.context_only
+        self.early_fuse = args.fuse_type in ['bruteforce']
         self.tol = args.tol
 
         self.workspace = args.workspace
@@ -669,34 +577,16 @@ class SingleHeadPreTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        if self.early_fuse or self.context_only:
-            for fused_context, labels in self.train_dataloader:
-                preds = self.model(fused_context)
-                labels = torch.LongTensor(labels).to(self.device)
+        for fused_context, labels in self.train_dataloader:
+            preds = self.model(fused_context)
+            labels = torch.LongTensor(labels).to(self.device)
 
-                loss = self.compute_loss(labels, preds)
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
+            loss = self.compute_loss(labels, preds)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-                total_loss += loss.item()
-        else:
-            for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, labels in self.train_dataloader:
-                preds = self.model(
-                    cited_title,
-                    cited_abstract,
-                    citing_title,
-                    citing_abstract,
-                    citation_context
-                )
-                labels = torch.LongTensor(labels).to(self.device)
-                loss = self.compute_loss(labels, preds)
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-
-                total_loss += loss.item()
+            total_loss += loss.item()
 
         return total_loss / len(self.train_dataloader)
 
@@ -710,16 +600,10 @@ class SingleHeadPreTrainer(Trainer):
 
         preds, labels = list(), list()
         with torch.no_grad():
-            if self.early_fuse or self.context_only:
-                for fused_context, label in data_loader:
-                    preds.append(self.model(
-                        fused_context).detach().cpu().numpy())
-                    labels.append(label)
-            else:
-                for cited_title, cited_abstract, citing_title, citing_abstract, citation_context, label in data_loader:
-                    preds.append(self.model(cited_title, cited_abstract, citing_title,
-                                 citing_abstract, citation_context).detach().cpu().numpy())
-                    labels.append(label)
+            for fused_context, label in data_loader:
+                preds.append(self.model(
+                    fused_context).detach().cpu().numpy())
+                labels.append(label)
 
             preds = np.concatenate(preds, axis=0)[:, self.main_label_indices]
             labels = torch.cat(labels, dim=0).numpy()
