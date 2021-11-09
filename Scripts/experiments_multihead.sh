@@ -1,42 +1,79 @@
 #!/bin/bash
 
-for main_dataset in "kim" "acl" "scicite"
+for SEED in 3515 4520
 do
-    for aux_dataset in "kim" "acl" "scicite"
+    for main_dataset in "kim" "acl" "scicite"
     do
-        if [ "${main_dataset}" == "acl" ]; then
-            lr=3e-5
-        else
-            lr=5e-5
-        fi
+        for aux_dataset in "kim" "acl" "scicite"
+        do
+            if [ "${main_dataset}" == "acl" ]; then
+                lr=2e-5
+            else
+                lr=2e-5
+            fi
 
-        if [ "${main_dataset}" != "${aux_dataset}" ]; then
-            python ../main.py \
-                --dataset=${main_dataset} \
-                --data_dir=../../../Data/ \
-                --aux_datasets=${aux_dataset} \
-                --lr_finetune=${lr} \
-                --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42 \
-                --lambdas=1.0,0.1 \
-                --num_epochs_finetune=15 \
-                --scheduler=slanted \
-                --fuse_type=bruteforce \
-                --two_step \
-                --seed=42 &> main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42_log.txt
-        else
-            python ../main.py \
-                --dataset=${main_dataset} \
-                --data_dir=../../../Data/ \
-                --workspace=../Workspaces/main${main_dataset}_twostep_slanted_bruteforce_seed42 \
-                --lr_finetune=${lr} \
-                --num_epochs_finetune=15 \
-                --scheduler=slanted \
-                --fuse_type=bruteforce \
-                --two_step \
-                --seed=42 &> main${main_dataset}_twostep_slanted_bruteforce_seed42_log.txt
-        fi
+            if [ "${main_dataset}" != "${aux_dataset}" ]; then
+                python ../main.py \
+                    --dataset=${main_dataset} \
+                    --data_dir=../../../Data/ \
+                    --aux_datasets=${aux_dataset} \
+                    --lr_finetune=${lr} \
+                    --workspace=../Workspaces/multihead_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --lambdas=1.0,0.1 \
+                    --multitask=multihead \
+                    --lm=bert \
+                    --seed=${SEED} &> multihead_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+            else
+                python ../main.py \
+                    --dataset=${main_dataset} \
+                    --data_dir=../../../Data/ \
+                    --workspace=../Workspaces/main${main_dataset}_seed${SEED} \
+                    --lr_finetune=${lr} \
+                    --multitask=multihead \
+                    --lm=bert \
+                    --seed=${SEED} &> main${main_dataset}_seed${SEED}_log.txt
+            fi
+        done
     done
 done
+
+# for main_dataset in "kim" "acl" "scicite"
+# do
+#     for aux_dataset in "kim" "acl" "scicite"
+#     do
+#         if [ "${main_dataset}" == "acl" ]; then
+#             lr=3e-5
+#         else
+#             lr=5e-5
+#         fi
+
+#         if [ "${main_dataset}" != "${aux_dataset}" ]; then
+#             python ../main.py \
+#                 --dataset=${main_dataset} \
+#                 --data_dir=../../../Data/ \
+#                 --aux_datasets=${aux_dataset} \
+#                 --lr_finetune=${lr} \
+#                 --workspace=../Workspaces/main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42 \
+#                 --lambdas=1.0,0.1 \
+#                 --num_epochs_finetune=15 \
+#                 --scheduler=slanted \
+#                 --fuse_type=bruteforce \
+#                 --two_step \
+#                 --seed=42 &> main${main_dataset}_aux${aux_dataset}_twostep_slanted_bruteforce_seed42_log.txt
+#         else
+#             python ../main.py \
+#                 --dataset=${main_dataset} \
+#                 --data_dir=../../../Data/ \
+#                 --workspace=../Workspaces/main${main_dataset}_twostep_slanted_bruteforce_seed42 \
+#                 --lr_finetune=${lr} \
+#                 --num_epochs_finetune=15 \
+#                 --scheduler=slanted \
+#                 --fuse_type=bruteforce \
+#                 --two_step \
+#                 --seed=42 &> main${main_dataset}_twostep_slanted_bruteforce_seed42_log.txt
+#         fi
+#     done
+# done
 
 # python ../main.py \
 #     --dataset=${MAIN_DATANAME} \
