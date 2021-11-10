@@ -77,8 +77,10 @@ class Trainer(object):
         # return roc_auc_score(labels, softmax(logits, axis=1), multi_class='ovo')
 
     def early_stop(self, roc, epoch):
-        if roc > self.best_roc:
-            self.best_roc = roc
+        cur_roc = sum(roc) if type(roc) == list else roc
+
+        if cur_roc > self.best_roc:
+            self.best_roc = cur_roc
             self.best_epoch = epoch
             self.save_model()
 
@@ -183,17 +185,38 @@ class Trainer(object):
 
         return state_dict['epoch']
 
+    # def log_tensorboard(self, roc, loss, epoch):
+    #     ''' Write experiment log to tensorboad. '''
+
+    #     self.logger.add_scalar('Training loss', loss, epoch)
+    #     self.logger.add_scalar('ROC', roc, epoch)
+
     def log_tensorboard(self, roc, loss, epoch):
         ''' Write experiment log to tensorboad. '''
+        cur_roc = roc[0] if type(roc) == list else roc
 
         self.logger.add_scalar('Training loss', loss, epoch)
-        self.logger.add_scalar('ROC', roc, epoch)
+        self.logger.add_scalar('ROC', cur_roc, epoch)
+
+    # def log_print(self, roc, loss, epoch, train_time, eval_time):
+    #     ''' Stdout of experiment log. '''
+
+    #     print('Epoch: {}, train time: {:.4f}, eval time: {:.4f}, training loss: {:.4f}, val roc: {:.4f}'.format(
+    #         epoch, train_time, eval_time, loss, roc))
 
     def log_print(self, roc, loss, epoch, train_time, eval_time):
         ''' Stdout of experiment log. '''
 
-        print('Epoch: {}, train time: {:.4f}, eval time: {:.4f}, training loss: {:.4f}, val roc: {:.4f}'.format(
-            epoch, train_time, eval_time, loss, roc))
+        if type(roc) == list:
+            main_roc = roc[0]
+            aux_rocs = ', '.join(['%.4f' % r for r in roc[1:]])
+            print('Epoch: {}, train time: {:.4f}, eval time: {:.4f}, training loss: {:.4f}, main val roc: {:.4f}, aux roc: {}'.format(
+                epoch, train_time, eval_time, loss, main_roc, aux_rocs))
+        elif type(roc) in [float, np.float64]:
+            print('Epoch: {}, train time: {:.4f}, eval time: {:.4f}, training loss: {:.4f}, val roc: {:.4f}'.format(
+                epoch, train_time, eval_time, loss, roc))
+        else:
+            raise TypeError('Type roc {} is wrong.'.format(type(roc)))
 
 
 class PreTrainer(Trainer):
@@ -272,7 +295,7 @@ class PreTrainer(Trainer):
 
 
 class MultiHeadTrainer(Trainer):
-    def __init__(self, model, train_datasets, val_dataset, test_dataset, args):
+    def __init__(self, model, train_datasets, val_datasets, test_dataset, args):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs_finetune
@@ -292,6 +315,13 @@ class MultiHeadTrainer(Trainer):
             self.lambdas[0] - 1.) < 1e-8, "Lambda for the main dataset should be one."
 
         self.num_heads = len(self.loss_fns)
+        self.num_ratios = np.array(
+            [d / train_datasets.lengths[0] for d in train_datasets.lengths])
+        self.num_ratios[self.num_ratios >= 2] = 2.  # truncation
+
+        print('Lambdas and num_ratios')
+        print(self.lambdas)
+        print(self.num_ratios)
 
         if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
@@ -322,8 +352,8 @@ class MultiHeadTrainer(Trainer):
 
         self.train_dataloader = DataLoader(
             train_datasets, batch_size=1, shuffle=True)
-        self.val_dataloader = DataLoader(
-            val_dataset, batch_size=1, shuffle=False)
+        self.val_dataloaders = [DataLoader(
+            val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
             test_dataset, batch_size=1, shuffle=False)
 
@@ -343,7 +373,7 @@ class MultiHeadTrainer(Trainer):
             loss = loss + self.loss_fns[head_idx](
                 logits[head_idx],
                 labels[head_idx]
-            ) * self.lambdas[head_idx]
+            ) * self.lambdas[head_idx]# * self.num_ratios[head_idx]
 
         return loss
 
@@ -388,27 +418,39 @@ class MultiHeadTrainer(Trainer):
     def eval_one_epoch(self, test):
         self.model.eval()
 
-        if test:
-            data_loader = self.test_dataloader  # for inference
+        if test:  # for inference
+            preds, labels = list(), list()
+            with torch.no_grad():
+                for fused_context, label in self.test_dataloader:
+                    preds.append(self.model(
+                        0, fused_context).detach().cpu().numpy())
+                    labels.append(label)
+
+                preds = np.concatenate(preds, axis=0)
+                labels = torch.cat(labels, dim=0).numpy()
+
+                roc = self.compute_metrics(labels, preds)
+                return roc
         else:
-            data_loader = self.val_dataloader  # for validation
+            with torch.no_grad():
+                roc = list()
+                for head_idx, data_loader in enumerate(self.val_dataloaders):
+                    preds, labels = list(), list()
+                    for fused_context, label in data_loader:
+                        preds.append(self.model(
+                            head_idx, fused_context).detach().cpu().numpy())
+                        labels.append(label)
 
-        preds, labels = list(), list()
-        with torch.no_grad():
-            for fused_context, label in data_loader:
-                preds.append(self.model(
-                    0, fused_context).detach().cpu().numpy())
-                labels.append(label)
+                    preds = np.concatenate(preds, axis=0)
+                    labels = torch.cat(labels, dim=0).numpy()
 
-            preds = np.concatenate(preds, axis=0)
-            labels = torch.cat(labels, dim=0).numpy()
-
-            roc = self.compute_metrics(labels, preds)
-            return roc
+                    roc.append(self.lambdas[head_idx] *
+                               self.compute_metrics(labels, preds))
+                return roc
 
 
 class SingleHeadTrainer(Trainer):
-    def __init__(self, model, train_datasets, val_dataset, test_dataset, args):
+    def __init__(self, model, train_datasets, val_datasets, test_dataset, args):
         self.device = args.device
         self.batch_size = args.batch_size_finetune
         self.num_epochs = args.num_epochs_finetune
@@ -428,7 +470,15 @@ class SingleHeadTrainer(Trainer):
             self.lambdas[0] - 1.) < 1e-8, "Lambda for the main dataset should be one."
 
         self.num_heads = len(self.lambdas)
-        self.main_label_indices = train_datasets.get_main_label_indices()
+        self.num_ratios = np.array(
+            [d / train_datasets.lengths[0] for d in train_datasets.lengths])
+        self.num_ratios[self.num_ratios >= 2] = 2.  # truncation
+
+        print('Lambdas and num_ratios')
+        print(self.lambdas)
+        print(self.num_ratios)
+
+        self.label_indices = train_datasets.get_label_indices()
 
         if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
@@ -459,8 +509,8 @@ class SingleHeadTrainer(Trainer):
 
         self.train_dataloader = DataLoader(
             train_datasets, batch_size=1, shuffle=True)
-        self.val_dataloader = DataLoader(
-            val_dataset, batch_size=1, shuffle=False)
+        self.val_dataloaders = [DataLoader(
+            val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
             test_dataset, batch_size=1, shuffle=False)
 
@@ -480,7 +530,7 @@ class SingleHeadTrainer(Trainer):
             loss = loss + self.loss_fn(
                 logits[head_idx],
                 labels[head_idx]
-            ) * self.lambdas[head_idx]
+            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
 
         return loss
 
@@ -520,23 +570,36 @@ class SingleHeadTrainer(Trainer):
     def eval_one_epoch(self, test):
         self.model.eval()
 
-        if test:
-            data_loader = self.test_dataloader  # for inference
-        else:
-            data_loader = self.val_dataloader  # for validation
+        if test:  # for inference
+            preds, labels = list(), list()
+            with torch.no_grad():
+                for fused_context, label in self.test_dataloader:
+                    preds.append(self.model(
+                        fused_context).detach().cpu().numpy())
+                    labels.append(label)
 
-        preds, labels = list(), list()
-        with torch.no_grad():
-            for fused_context, label in data_loader:
-                preds.append(self.model(
-                    fused_context).detach().cpu().numpy())
-                labels.append(label)
+                preds = np.concatenate(preds, axis=0)[:, self.label_indices[0]]
+                labels = torch.cat(labels, dim=0).numpy()
 
-            preds = np.concatenate(preds, axis=0)[:, self.main_label_indices]
-            labels = torch.cat(labels, dim=0).numpy()
+                roc = self.compute_metrics(labels, preds)
+                return roc
+        else:  # for validation
+            with torch.no_grad():
+                roc = list()
+                for head_idx, data_loader in enumerate(self.val_dataloaders):
+                    preds, labels = list(), list()
+                    for fused_context, label in data_loader:
+                        preds.append(self.model(
+                            fused_context).detach().cpu().numpy())
+                        labels.append(label)
 
-            roc = self.compute_metrics(labels, preds)
-            return roc
+                    preds = np.concatenate(preds, axis=0)[
+                        :, self.label_indices[head_idx]]
+                    labels = torch.cat(labels, dim=0).numpy()
+
+                    roc.append(self.lambdas[head_idx] *
+                               self.compute_metrics(labels, preds))
+                return roc
 
 
 class SingleHeadPreTrainer(Trainer):
@@ -568,7 +631,7 @@ class SingleHeadPreTrainer(Trainer):
 
         self.logger = SummaryWriter(os.path.join(self.workspace, 'log'))
 
-        self.main_label_indices = train_dataset.get_main_label_indices()
+        self.label_indices = train_dataset.get_label_indices()
 
         self.best_epoch = 0
         self.best_roc = 0.
@@ -605,7 +668,7 @@ class SingleHeadPreTrainer(Trainer):
                     fused_context).detach().cpu().numpy())
                 labels.append(label)
 
-            preds = np.concatenate(preds, axis=0)[:, self.main_label_indices]
+            preds = np.concatenate(preds, axis=0)[:, self.label_indices[0]]
             labels = torch.cat(labels, dim=0).numpy()
 
             roc = self.compute_metrics(labels, preds)

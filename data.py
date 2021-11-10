@@ -314,8 +314,11 @@ class SingleHeadDatasets(object):
     def get_label_weights(self):
         return self.label_weights
 
-    def get_main_label_indices(self):
-        return np.arange(self.num_labels[1])
+    # def get_main_label_indices(self):
+    #     return np.arange(self.num_labels[1])
+
+    def get_label_indices(self):
+        return [np.arange(self.num_labels[i], self.num_labels[i+1]) for i in range(len(self.num_labels)-1)]
 
 
 class SingleHeadEmbeddedDatasets(object):
@@ -377,8 +380,8 @@ class SingleHeadEmbeddedDatasets(object):
     def get_label_weights(self):
         return self.label_weights
 
-    def get_main_label_indices(self):
-        return np.arange(self.num_labels[1])
+    def get_label_indices(self):
+        return [np.arange(self.num_labels[i], self.num_labels[i+1]) for i in range(len(self.num_labels)-1)]
 
 
 def create_data_channels(filename, modelname, fuse_type, max_length):
@@ -395,8 +398,8 @@ def create_data_channels(filename, modelname, fuse_type, max_length):
         lambda x: label2id[x])
 
     data_train = data[data['split'] == 'train'].reset_index()
-    data_val = data[data['split'] == 'val']
-    data_test = data[data['split'] == 'test']
+    data_val = data[data['split'] == 'val'].reset_index()
+    data_test = data[data['split'] == 'test'].reset_index()
 
     train_data = Dataset(
         data_train,

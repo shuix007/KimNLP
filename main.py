@@ -106,7 +106,8 @@ def main_singlehead(args):
         finetuner = SingleHeadTrainer(
             model,
             singlehead_train_datasets,
-            token_val_data,
+            token_val_data_list,
+            # token_val_data,
             token_test_data,
             args
         )
@@ -118,7 +119,8 @@ def main_singlehead(args):
         finetuner = SingleHeadTrainer(
             model,
             singlehead_train_datasets,
-            token_val_data,
+            token_val_data_list,
+            # token_val_data,
             token_test_data,
             args
         )
@@ -217,7 +219,8 @@ def main_multihead(args):
         finetuner = MultiHeadTrainer(
             model,
             multihead_train_datasets,
-            token_val_data,
+            token_val_data_list,
+            # [token_val_data],
             token_test_data,
             args
         )
@@ -229,7 +232,8 @@ def main_multihead(args):
         finetuner = MultiHeadTrainer(
             model,
             multihead_train_datasets,
-            token_val_data,
+            token_val_data_list,
+            # [token_val_data],
             token_test_data,
             args
         )
@@ -250,7 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--batch_size_finetune', default=32, type=int)
     parser.add_argument('--lr', default=0.0001, type=float)
-    parser.add_argument('--lr_finetune', default=5e-5, type=float)
+    parser.add_argument('--lr_finetune', default=2e-5, type=float)
     parser.add_argument('--decay_rate', default=0.5, type=float)
     parser.add_argument('--decay_step', default=5, type=int)
     parser.add_argument('--num_epochs', default=100, type=int)
