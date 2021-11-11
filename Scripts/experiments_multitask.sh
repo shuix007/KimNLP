@@ -1,65 +1,89 @@
 #!/bin/bash
 
-for SEED in 42 4520
+for SEED in 42 3515 4520
 do
     for main_dataset in "kim" "acl" "scicite"
     do
         for aux_dataset in "kim" "acl" "scicite"
         do
             if [ "${main_dataset}" != "${aux_dataset}" ]; then
-                python ../main.py \
-                    --dataset=${main_dataset} \
-                    --data_dir=../../../Data/ \
-                    --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/multihead_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
-                    --lambdas=1.0,0.1 \
-                    --multitask=multihead \
-                    --lm=scibert \
-                    --seed=${SEED} &> multihead_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                if [ "${main_dataset}" == "kim" ]; then
+                    if [ "${aux_dataset}" == "acl" ]; then
+                        lambdas=1.0,0.4735
+                    else
+                        lambdas=1.0,0.5419
+                    fi
+                fi
+
+                if [ "${main_dataset}" == "acl" ]; then
+                    if [ "${aux_dataset}" == "kim" ]; then
+                        lambdas=1.0,0.6717
+                    else
+                        lambdas=1.0,0.3143
+                    fi
+                fi
+
+                if [ "${main_dataset}" == "scicite" ]; then
+                    if [ "${aux_dataset}" == "acl" ]; then
+                        lambdas=1.0,0.3720
+                    else
+                        lambdas=1.0,0.6156
+                    fi
+                fi
 
                 python ../main.py \
                     --dataset=${main_dataset} \
                     --data_dir=../../../Data/ \
                     --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/singlehead_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
-                    --lambdas=1.0,0.1 \
+                    --workspace=../Workspaces/multihead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --lambdas=${lambdas} \
+                    --multitask=multihead \
+                    --lm=bert \
+                    --seed=${SEED} &> multihead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+
+                python ../main.py \
+                    --dataset=${main_dataset} \
+                    --data_dir=../../../Data/ \
+                    --aux_datasets=${aux_dataset} \
+                    --workspace=../Workspaces/singlehead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --lambdas=${lambdas} \
                     --multitask=singlehead \
-                    --lm=scibert \
-                    --seed=${SEED} &> singlehead_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                    --lm=bert \
+                    --seed=${SEED} &> singlehead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
             fi
         done
 
-        if [ "${main_dataset}" == "kim" ]; then
-            aux_datasets="acl,scicite"
-        fi
+        # if [ "${main_dataset}" == "kim" ]; then
+        #     aux_datasets="acl,scicite"
+        # fi
 
-        if [ "${main_dataset}" == "acl" ]; then
-            aux_datasets="kim,scicite"
-        fi
+        # if [ "${main_dataset}" == "acl" ]; then
+        #     aux_datasets="kim,scicite"
+        # fi
 
-        if [ "${main_dataset}" == "scicite" ]; then
-            aux_datasets="kim,acl"
-        fi
+        # if [ "${main_dataset}" == "scicite" ]; then
+        #     aux_datasets="kim,acl"
+        # fi
 
-        python ../main.py \
-                --dataset=${main_dataset} \
-                --data_dir=../../../Data/ \
-                --aux_datasets=${aux_datasets} \
-                --workspace=../Workspaces/multihead_main${main_dataset}_aux${aux_datasets}_seed${SEED} \
-                --lambdas=1.0,0.1,0.1 \
-                --multitask=multihead \
-                --lm=scibert \
-                --seed=${SEED} &> multihead_main${main_dataset}_aux${aux_datasets}_seed${SEED}_log.txt
+        # python ../main.py \
+        #         --dataset=${main_dataset} \
+        #         --data_dir=../../../Data/ \
+        #         --aux_datasets=${aux_datasets} \
+        #         --workspace=../Workspaces/multihead_main${main_dataset}_aux${aux_datasets}_seed${SEED} \
+        #         --lambdas=1.0,0.1,0.1 \
+        #         --multitask=multihead \
+        #         --lm=scibert \
+        #         --seed=${SEED} &> multihead_main${main_dataset}_aux${aux_datasets}_seed${SEED}_log.txt
 
-        python ../main.py \
-                --dataset=${main_dataset} \
-                --data_dir=../../../Data/ \
-                --aux_datasets=${aux_datasets} \
-                --workspace=../Workspaces/singlehead_main${main_datasets}_aux${aux_dataset}_seed${SEED} \
-                --lambdas=1.0,0.1,0.1 \
-                --multitask=singlehead \
-                --lm=scibert \
-                --seed=${SEED} &> singlehead_main${main_dataset}_aux${aux_datasets}_seed${SEED}_log.txt
+        # python ../main.py \
+        #         --dataset=${main_dataset} \
+        #         --data_dir=../../../Data/ \
+        #         --aux_datasets=${aux_datasets} \
+        #         --workspace=../Workspaces/singlehead_main${main_datasets}_aux${aux_dataset}_seed${SEED} \
+        #         --lambdas=1.0,0.1,0.1 \
+        #         --multitask=singlehead \
+        #         --lm=scibert \
+        #         --seed=${SEED} &> singlehead_main${main_dataset}_aux${aux_datasets}_seed${SEED}_log.txt
     done
 done
 

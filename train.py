@@ -350,8 +350,8 @@ class MultiHeadTrainer(Trainer):
                 'Scheduler {} not implemented.'.format(args.scheduler))
         print('Using {} scheduler.'.format(args.scheduler))
 
-        self.train_dataloader = DataLoader(
-            train_datasets, batch_size=1, shuffle=True)
+        self.train_dataloaders = [DataLoader(
+            train_dataset, batch_size=1, shuffle=True) for train_dataset in train_datasets.datasets]
         self.val_dataloaders = [DataLoader(
             val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
@@ -381,14 +381,14 @@ class MultiHeadTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        num_batches = (len(self.train_dataloader) // self.batch_size) + 1
+        num_batches = (len(self.train_dataloaders[0]) // self.batch_size) + 1
         for _ in range(num_batches):
-            count = 0
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            for instances in self.train_dataloader:
-                for head_idx, instance in enumerate(instances):
+            for head_idx, dataloader in enumerate(self.train_dataloaders):
+                count = 0
+                for instance in dataloader:
                     fused_context, label = instance
                     preds[head_idx].append(
                         self.model(
@@ -397,11 +397,9 @@ class MultiHeadTrainer(Trainer):
                         )
                     )
                     labels[head_idx].append(label)
-                count += 1
-
-                if count == self.batch_size:
-                    count = 0
-                    break
+                    count += 1
+                    if count == self.batch_size:
+                        break
 
             preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
@@ -479,6 +477,7 @@ class SingleHeadTrainer(Trainer):
         print(self.num_ratios)
 
         self.label_indices = train_datasets.get_label_indices()
+        self.label_offsets = train_datasets.get_label_offsets()
 
         if not args.one_step or not args.diff_lr:
             self.optimizer = AdamW(self.model.parameters(),
@@ -507,8 +506,8 @@ class SingleHeadTrainer(Trainer):
                 'Scheduler {} not implemented.'.format(args.scheduler))
         print('Using {} scheduler.'.format(args.scheduler))
 
-        self.train_dataloader = DataLoader(
-            train_datasets, batch_size=1, shuffle=True)
+        self.train_dataloaders = [DataLoader(
+            train_dataset, batch_size=1, shuffle=True) for train_dataset in train_datasets.datasets]
         self.val_dataloaders = [DataLoader(
             val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
@@ -529,8 +528,8 @@ class SingleHeadTrainer(Trainer):
         for head_idx in range(1, self.num_heads):
             loss = loss + self.loss_fn(
                 logits[head_idx],
-                labels[head_idx]
-            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
+                labels[head_idx] + self.label_offsets[head_idx]
+            ) * self.lambdas[head_idx]# * self.num_ratios[head_idx]
 
         return loss
 
@@ -538,22 +537,21 @@ class SingleHeadTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        num_batches = (len(self.train_dataloader) // self.batch_size) + 1
+        num_batches = (len(self.train_dataloaders[0]) // self.batch_size) + 1
         for _ in range(num_batches):
-            count = 0
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            for instances in self.train_dataloader:
-                for head_idx, instance in enumerate(instances):
+            for head_idx, dataloader in enumerate(self.train_dataloaders):
+                count = 0
+                for instance in dataloader:
                     fused_context, label = instance
                     preds[head_idx].append(self.model(fused_context))
                     labels[head_idx].append(label)
-                count += 1
-
-                if count == self.batch_size:
-                    count = 0
-                    break
+                    
+                    count += 1
+                    if count == self.batch_size:
+                        break
 
             preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]

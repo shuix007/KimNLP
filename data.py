@@ -314,8 +314,8 @@ class SingleHeadDatasets(object):
     def get_label_weights(self):
         return self.label_weights
 
-    # def get_main_label_indices(self):
-    #     return np.arange(self.num_labels[1])
+    def get_label_offsets(self):
+        return self.num_labels[:-1]
 
     def get_label_indices(self):
         return [np.arange(self.num_labels[i], self.num_labels[i+1]) for i in range(len(self.num_labels)-1)]
