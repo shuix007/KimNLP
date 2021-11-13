@@ -225,8 +225,13 @@ if __name__ == '__main__':
                 col_mat = mat / mat.sum(axis=0, keepdims=True)
                 n_rows, n_cols = row_mat.shape
 
-                rownorm_entropy = entropy(row_mat, base=n_cols, axis=1).mean()
-                colnorm_entropy = entropy(col_mat, base=n_rows, axis=0).mean()
+                base_row_entropy = entropy(mat.sum(axis=0), base=n_cols)
+                base_col_entropy = entropy(mat.sum(axis=1), base=n_rows)
+
+                row_weight = mat.sum(axis=1) / mat.sum()
+                col_weight = mat.sum(axis=0) / mat.sum()
+                rownorm_entropy = base_row_entropy - entropy(row_mat, base=n_cols, axis=1).mean()# .dot(row_weight)
+                colnorm_entropy = base_col_entropy - entropy(col_mat, base=n_rows, axis=0).mean() # .dot(col_weight)
                 mean_entropy = (rownorm_entropy + colnorm_entropy) / 2
                 print(key, rownorm_entropy, colnorm_entropy, mean_entropy)
     

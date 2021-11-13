@@ -49,6 +49,9 @@ class Trainer(object):
         elif args.scheduler == 'linear':
             self.scheduler = get_linear_scheduler(
                 self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune, final_lr=args.lr_finetune/32)
+        elif args.scheduler == 'const':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=self.num_epochs, gamma=1., verbose=True)
         else:
             raise ValueError(
                 'Scheduler {} not implemented.'.format(args.scheduler))
@@ -317,7 +320,7 @@ class MultiHeadTrainer(Trainer):
         self.num_heads = len(self.loss_fns)
         self.num_ratios = np.array(
             [d / train_datasets.lengths[0] for d in train_datasets.lengths])
-        self.num_ratios[self.num_ratios >= 2] = 2.  # truncation
+        self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
 
         print('Lambdas and num_ratios')
         print(self.lambdas)
@@ -345,6 +348,9 @@ class MultiHeadTrainer(Trainer):
         elif args.scheduler == 'linear':
             self.scheduler = get_linear_scheduler(
                 self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune, final_lr=args.lr_finetune/32)
+        elif args.scheduler == 'const':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=self.num_epochs, gamma=1., verbose=True)
         else:
             raise ValueError(
                 'Scheduler {} not implemented.'.format(args.scheduler))
@@ -373,7 +379,7 @@ class MultiHeadTrainer(Trainer):
             loss = loss + self.loss_fns[head_idx](
                 logits[head_idx],
                 labels[head_idx]
-            ) * self.lambdas[head_idx]# * self.num_ratios[head_idx]
+            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
 
         return loss
 
@@ -470,7 +476,7 @@ class SingleHeadTrainer(Trainer):
         self.num_heads = len(self.lambdas)
         self.num_ratios = np.array(
             [d / train_datasets.lengths[0] for d in train_datasets.lengths])
-        self.num_ratios[self.num_ratios >= 2] = 2.  # truncation
+        self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
 
         print('Lambdas and num_ratios')
         print(self.lambdas)
@@ -501,6 +507,9 @@ class SingleHeadTrainer(Trainer):
         elif args.scheduler == 'linear':
             self.scheduler = get_linear_scheduler(
                 self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr_finetune, final_lr=args.lr_finetune/32)
+        elif args.scheduler == 'const':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=self.num_epochs, gamma=1., verbose=True)
         else:
             raise ValueError(
                 'Scheduler {} not implemented.'.format(args.scheduler))
@@ -529,7 +538,7 @@ class SingleHeadTrainer(Trainer):
             loss = loss + self.loss_fn(
                 logits[head_idx],
                 labels[head_idx] + self.label_offsets[head_idx]
-            ) * self.lambdas[head_idx]# * self.num_ratios[head_idx]
+            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
 
         return loss
 

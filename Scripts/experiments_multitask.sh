@@ -9,25 +9,25 @@ do
             if [ "${main_dataset}" != "${aux_dataset}" ]; then
                 if [ "${main_dataset}" == "kim" ]; then
                     if [ "${aux_dataset}" == "acl" ]; then
-                        lambdas=1.0,0.4735
+                        lambdas=1.0,0.1594
                     else
-                        lambdas=1.0,0.5419
+                        lambdas=1.0,0.1611
                     fi
                 fi
 
                 if [ "${main_dataset}" == "acl" ]; then
                     if [ "${aux_dataset}" == "kim" ]; then
-                        lambdas=1.0,0.6717
+                        lambdas=1.0,0.0644
                     else
-                        lambdas=1.0,0.3143
+                        lambdas=1.0,0.0666
                     fi
                 fi
 
                 if [ "${main_dataset}" == "scicite" ]; then
                     if [ "${aux_dataset}" == "acl" ]; then
-                        lambdas=1.0,0.3720
+                        lambdas=1.0,0.1522
                     else
-                        lambdas=1.0,0.6156
+                        lambdas=1.0,0.0466
                     fi
                 fi
 
@@ -35,21 +35,23 @@ do
                     --dataset=${main_dataset} \
                     --data_dir=../../../Data/ \
                     --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/multihead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --workspace=../Workspaces/deltaentropy_multihead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
                     --lambdas=${lambdas} \
                     --multitask=multihead \
-                    --lm=bert \
-                    --seed=${SEED} &> multihead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                    --lm=scibert \
+                    --scheduler=const \
+                    --seed=${SEED} &> deltaentropy_multihead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
 
                 python ../main.py \
                     --dataset=${main_dataset} \
                     --data_dir=../../../Data/ \
                     --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/singlehead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --workspace=../Workspaces/deltaentropy_singlehead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
                     --lambdas=${lambdas} \
                     --multitask=singlehead \
-                    --lm=bert \
-                    --seed=${SEED} &> singlehead_bert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                    --lm=scibert \
+                    --scheduler=const \
+                    --seed=${SEED} &> deltaentropy_singlehead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
             fi
         done
 
