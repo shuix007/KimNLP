@@ -1,5 +1,7 @@
 #!/bin/bash
 
+lm=bert
+
 for SEED in 42 3515 4520
 do
     for main_dataset in "kim" "acl" "scicite"
@@ -35,23 +37,23 @@ do
                     --dataset=${main_dataset} \
                     --data_dir=../../../Data/ \
                     --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/deltaentropy_multihead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --workspace=../Workspaces/deltaentropy_multihead_${lm}_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
                     --lambdas=${lambdas} \
                     --multitask=multihead \
-                    --lm=scibert \
-                    --scheduler=const \
-                    --seed=${SEED} &> deltaentropy_multihead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                    --lm=${lm} \
+                    --scheduler=slanted \
+                    --seed=${SEED} &> deltaentropy_multihead_${lm}_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
 
                 python ../main.py \
                     --dataset=${main_dataset} \
                     --data_dir=../../../Data/ \
                     --aux_datasets=${aux_dataset} \
-                    --workspace=../Workspaces/deltaentropy_singlehead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
+                    --workspace=../Workspaces/deltaentropy_singlehead_${lm}_main${main_dataset}_aux${aux_dataset}_seed${SEED} \
                     --lambdas=${lambdas} \
                     --multitask=singlehead \
-                    --lm=scibert \
-                    --scheduler=const \
-                    --seed=${SEED} &> deltaentropy_singlehead_scibert_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
+                    --lm=${lm} \
+                    --scheduler=slanted \
+                    --seed=${SEED} &> deltaentropy_singlehead_${lm}_main${main_dataset}_aux${aux_dataset}_seed${SEED}_log.txt
             fi
         done
 

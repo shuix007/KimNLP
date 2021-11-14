@@ -310,6 +310,7 @@ class MultiHeadTrainer(Trainer):
 
         self.loss_fns = [nn.CrossEntropyLoss(weight=lb_weights.to(
             self.device)) for lb_weights in train_datasets.get_label_weights()]
+        # self.loss_fns = [nn.CrossEntropyLoss() for lb_weights in train_datasets.get_label_weights()]
         self.lambdas = list(map(float, args.lambdas.split(',')))
 
         assert len(self.lambdas) == len(
@@ -318,9 +319,11 @@ class MultiHeadTrainer(Trainer):
             self.lambdas[0] - 1.) < 1e-8, "Lambda for the main dataset should be one."
 
         self.num_heads = len(self.loss_fns)
+        # self.num_ratios = np.array(
+        #     [d / train_datasets.lengths[0] for d in train_datasets.lengths])
+        # self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
         self.num_ratios = np.array(
-            [d / train_datasets.lengths[0] for d in train_datasets.lengths])
-        self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
+            [min(train_datasets.lengths[0] / d, 1) for d in train_datasets.lengths])
 
         print('Lambdas and num_ratios')
         print(self.lambdas)
@@ -356,8 +359,8 @@ class MultiHeadTrainer(Trainer):
                 'Scheduler {} not implemented.'.format(args.scheduler))
         print('Using {} scheduler.'.format(args.scheduler))
 
-        self.train_dataloaders = [DataLoader(
-            train_dataset, batch_size=1, shuffle=True) for train_dataset in train_datasets.datasets]
+        self.train_dataloaders = DataLoader(
+            train_datasets, batch_size=1, shuffle=True)
         self.val_dataloaders = [DataLoader(
             val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
@@ -370,16 +373,13 @@ class MultiHeadTrainer(Trainer):
         self.best_roc = 0.
 
     def compute_loss(self, labels, logits):
-        loss = self.loss_fns[0](
-            logits[0],
-            labels[0]
-        )
-
-        for head_idx in range(1, self.num_heads):
-            loss = loss + self.loss_fns[head_idx](
-                logits[head_idx],
-                labels[head_idx]
-            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
+        loss = 0.
+        for head_idx in range(self.num_heads):
+            if labels[head_idx].size(0) > 0:
+                loss = loss + self.loss_fns[head_idx](
+                    logits[head_idx],
+                    labels[head_idx]
+                ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
 
         return loss
 
@@ -387,30 +387,35 @@ class MultiHeadTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        num_batches = (len(self.train_dataloaders[0]) // self.batch_size) + 1
+        num_batches = (len(self.train_dataloaders) // self.batch_size) + 1
         for _ in range(num_batches):
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            for head_idx, dataloader in enumerate(self.train_dataloaders):
-                count = 0
-                for instance in dataloader:
-                    fused_context, label = instance
-                    preds[head_idx].append(
-                        self.model(
-                            head_idx,
-                            fused_context
-                        )
+            count = 0
+            for head_idx, context, label in self.train_dataloaders:
+                preds[head_idx].append(
+                    self.model(
+                        head_idx,
+                        context
                     )
-                    labels[head_idx].append(label)
-                    count += 1
-                    if count == self.batch_size:
-                        break
-
-            preds = [torch.cat(p, dim=0) for p in preds]
+                )
+                labels[head_idx].append(label)
+                count += 1
+                if count == self.batch_size:
+                    count = 0
+                    break
+            
+            final_preds = list()
+            for p in preds:
+                if len(p) > 0:
+                    final_preds.append(torch.cat(p, dim=0))
+                else:
+                    final_preds.append([])
+            # preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
 
-            loss = self.compute_loss(labels, preds)
+            loss = self.compute_loss(labels, final_preds)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -464,6 +469,7 @@ class SingleHeadTrainer(Trainer):
         self.workspace = args.workspace
         self.model = model
 
+        # self.loss_fn = nn.CrossEntropyLoss()
         self.loss_fn = nn.CrossEntropyLoss(
             weight=train_datasets.get_label_weights().to(self.device))
         self.lambdas = list(map(float, args.lambdas.split(',')))
@@ -475,8 +481,8 @@ class SingleHeadTrainer(Trainer):
 
         self.num_heads = len(self.lambdas)
         self.num_ratios = np.array(
-            [d / train_datasets.lengths[0] for d in train_datasets.lengths])
-        self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
+            [min(train_datasets.lengths[0] / d, 1) for d in train_datasets.lengths])
+        # self.num_ratios[self.num_ratios >= 3] = 3.  # truncation
 
         print('Lambdas and num_ratios')
         print(self.lambdas)
@@ -515,8 +521,8 @@ class SingleHeadTrainer(Trainer):
                 'Scheduler {} not implemented.'.format(args.scheduler))
         print('Using {} scheduler.'.format(args.scheduler))
 
-        self.train_dataloaders = [DataLoader(
-            train_dataset, batch_size=1, shuffle=True) for train_dataset in train_datasets.datasets]
+        self.train_dataloaders = DataLoader(
+            train_datasets, batch_size=1, shuffle=True)
         self.val_dataloaders = [DataLoader(
             val_dataset, batch_size=1, shuffle=False) for val_dataset in val_datasets]
         self.test_dataloader = DataLoader(
@@ -529,16 +535,13 @@ class SingleHeadTrainer(Trainer):
         self.best_roc = 0.
 
     def compute_loss(self, labels, logits):
-        loss = self.loss_fn(
-            logits[0],
-            labels[0]
-        )
-
-        for head_idx in range(1, self.num_heads):
-            loss = loss + self.loss_fn(
-                logits[head_idx],
-                labels[head_idx] + self.label_offsets[head_idx]
-            ) * self.lambdas[head_idx] * self.num_ratios[head_idx]
+        loss = 0.
+        for head_idx in range(self.num_heads):
+            if labels[head_idx].size(0) > 0:
+                loss = loss + self.loss_fn(
+                    logits[head_idx],
+                    labels[head_idx] + self.label_offsets[head_idx]
+                ) * self.lambdas[head_idx]# * self.num_ratios[head_idx]
 
         return loss
 
@@ -546,26 +549,31 @@ class SingleHeadTrainer(Trainer):
         total_loss = 0.
         self.model.train()
 
-        num_batches = (len(self.train_dataloaders[0]) // self.batch_size) + 1
+        num_batches = (len(self.train_dataloaders) // self.batch_size) + 1
         for _ in range(num_batches):
             preds = [[] for _ in range(self.num_heads)]
             labels = [[] for _ in range(self.num_heads)]
 
-            for head_idx, dataloader in enumerate(self.train_dataloaders):
-                count = 0
-                for instance in dataloader:
-                    fused_context, label = instance
-                    preds[head_idx].append(self.model(fused_context))
-                    labels[head_idx].append(label)
-                    
-                    count += 1
-                    if count == self.batch_size:
-                        break
+            count = 0
+            for head_idx, context, label in self.train_dataloaders:
+                preds[head_idx].append(self.model(context))
+                labels[head_idx].append(label)
 
-            preds = [torch.cat(p, dim=0) for p in preds]
+                count += 1
+                if count == self.batch_size:
+                    count = 0
+                    break
+            
+            final_preds = list()
+            for p in preds:
+                if len(p) > 0:
+                    final_preds.append(torch.cat(p, dim=0))
+                else:
+                    final_preds.append([])
+            # preds = [torch.cat(p, dim=0) for p in preds]
             labels = [torch.LongTensor(lb).to(self.device) for lb in labels]
 
-            loss = self.compute_loss(labels, preds)
+            loss = self.compute_loss(labels, final_preds)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -622,7 +630,7 @@ class SingleHeadPreTrainer(Trainer):
 
         self.loss_fn = nn.CrossEntropyLoss(
             weight=train_dataset.get_label_weights().to(self.device))
-
+        # self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = Adam(self.model.parameters(),
                               lr=args.lr, weight_decay=args.l2)
         self.scheduler = lr_scheduler.StepLR(

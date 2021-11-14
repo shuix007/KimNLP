@@ -227,49 +227,16 @@ class MultiHeadDatasets(object):
             self.datasets), dtype=np.float32)  # sample probability for the datasets
 
         self.lengths = np.array([len(dataset) for dataset in self.datasets])
-        self.main_length = self.lengths[0]
-
-    def __len__(self):
-        return self.lengths[0]
-
-    def __getitem__(self, idx):
-        indices = self._get_indices(idx)
-
-        instances = [d.__getitem__(indices[i])
-                     for i, d in enumerate(self.datasets)]
-        return instances
-
-    def _get_indices(self, idx):
-        indices = list()
-        for i, l in enumerate(self.lengths):
-            if l < self.main_length:
-                indices.append(int((idx / self.main_length) * l))
-            elif l > self.main_length:
-                portion = l / self.main_length
-                idx_low, idx_high = int(idx*portion), int((idx+1)*portion)
-                indices.append(np.random.randint(idx_low, idx_high))
-            else:
-                indices.append(idx)
-        return indices
-
-    def get_label_weights(self):
-        return [d.get_label_weights() for d in self.datasets]
-
-
-class SingleHeadDatasets(object):
-    def __init__(self, datasets, p=None):
-        self.datasets = datasets
-        self.p = p if p is not None else np.full(len(self.datasets), 1. / len(
-            self.datasets), dtype=np.float32)  # sample probability for the datasets
-
-        self.lengths = np.array([len(dataset) for dataset in self.datasets])
-        self.total_length = np.sum(self.lengths)
-        self.main_length = self.lengths[0]
+        self.cumsum_length = np.cumsum(self.lengths)
 
         self._compute_label_weights()
 
-        self._index = -1
-        self._data_index = 0
+        # a = [d.get_label_weights() for d in self.datasets]
+        # b = [self.label_weights[self.num_labels[i]:self.num_labels[i+1]] for i in range(len(self.num_labels)-1)]
+        # print(a)
+        # print(b)
+        # print('Done.')
+        # exit()
 
     def _compute_label_weights(self):
         ''' Compute the weights of the labels
@@ -285,31 +252,62 @@ class SingleHeadDatasets(object):
         self.label_weights[labels] = counts.max() / counts
 
     def __len__(self):
-        return self.lengths[0]
+        return self.lengths.sum()
 
     def __getitem__(self, idx):
-        indices = self._get_indices(idx)
+        data_idx = 0
+        actual_idx = idx
 
-        instances = [d.__getitem__(indices[i])
-                     for i, d in enumerate(self.datasets)]
-        for i in range(len(instances)):
-            instances[i][-1] = instances[i][-1] + \
-                self.num_labels[i]  # map the labels
+        for i in range(len(self.cumsum_length) - 1):
+            if idx >= self.cumsum_length[i] and idx < self.cumsum_length[i+1]:
+                data_idx = i + 1
+                actual_idx = idx % self.cumsum_length[i]
 
-        return instances
+        return [data_idx] + self.datasets[data_idx].__getitem__(actual_idx)
 
-    def _get_indices(self, idx):
-        indices = list()
-        for i, l in enumerate(self.lengths):
-            if l < self.main_length:
-                indices.append(int((idx / self.main_length) * l))
-            elif l > self.main_length:
-                portion = l / self.main_length
-                idx_low, idx_high = int(idx*portion), int((idx+1)*portion)
-                indices.append(np.random.randint(idx_low, idx_high))
-            else:
-                indices.append(idx)
-        return indices
+    def get_label_weights(self):
+        return [self.label_weights[self.num_labels[i]:self.num_labels[i+1]] for i in range(len(self.num_labels)-1)]
+        # return [d.get_label_weights() for d in self.datasets]
+
+
+class SingleHeadDatasets(object):
+    def __init__(self, datasets, p=None):
+        self.datasets = datasets
+        self.p = p if p is not None else np.full(len(self.datasets), 1. / len(
+            self.datasets), dtype=np.float32)  # sample probability for the datasets
+
+        self.lengths = np.array([len(dataset) for dataset in self.datasets])
+        self.cumsum_length = np.cumsum(self.lengths)
+        self.main_length = self.lengths[0]
+
+        self._compute_label_weights()
+
+    def _compute_label_weights(self):
+        ''' Compute the weights of the labels
+        '''
+        self.num_labels = np.cumsum(
+            [0] + [len(d.get_label_weights()) for d in self.datasets])
+        labels = torch.cat([d.labels + self.num_labels[i]
+                           for i, d in enumerate(self.datasets)])
+
+        labels, counts = torch.unique(labels, return_counts=True)
+
+        self.label_weights = torch.zeros_like(counts, dtype=torch.float32)
+        self.label_weights[labels] = counts.max() / counts
+
+    def __len__(self):
+        return self.lengths.sum()
+
+    def __getitem__(self, idx):
+        data_idx = 0
+        actual_idx = idx
+
+        for i in range(len(self.cumsum_length) - 1):
+            if idx >= self.cumsum_length[i] and idx < self.cumsum_length[i+1]:
+                data_idx = i + 1
+                actual_idx = idx % self.cumsum_length[i]
+
+        return [data_idx] + self.datasets[data_idx].__getitem__(actual_idx)
 
     def get_label_weights(self):
         return self.label_weights
