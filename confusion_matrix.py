@@ -230,8 +230,8 @@ if __name__ == '__main__':
 
                 row_weight = mat.sum(axis=1) / mat.sum()
                 col_weight = mat.sum(axis=0) / mat.sum()
-                rownorm_entropy = base_row_entropy - entropy(row_mat, base=n_cols, axis=1).mean()# .dot(row_weight)
-                colnorm_entropy = base_col_entropy - entropy(col_mat, base=n_rows, axis=0).mean() # .dot(col_weight)
+                rownorm_entropy = base_row_entropy - entropy(row_mat, base=n_cols, axis=1).dot(row_weight)#.mean()
+                colnorm_entropy = base_col_entropy - entropy(col_mat, base=n_rows, axis=0).dot(col_weight)#.mean()
                 mean_entropy = (rownorm_entropy + colnorm_entropy) / 2
                 print(key, rownorm_entropy, colnorm_entropy, mean_entropy)
     

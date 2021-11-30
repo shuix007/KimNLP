@@ -1,8 +1,8 @@
 #!/bin/bash
 
-lm=bert
+lm=scibert
 
-for SEED in 42 3515 4520
+for SEED in 3515 4520
 do
     for main_dataset in "kim" "acl" "scicite"
     do
@@ -11,25 +11,25 @@ do
             if [ "${main_dataset}" != "${aux_dataset}" ]; then
                 if [ "${main_dataset}" == "kim" ]; then
                     if [ "${aux_dataset}" == "acl" ]; then
-                        lambdas=1.0,0.1594
+                        lambdas=1.0,0.3406
                     else
-                        lambdas=1.0,0.1611
+                        lambdas=1.0,0.3471
                     fi
                 fi
 
                 if [ "${main_dataset}" == "acl" ]; then
                     if [ "${aux_dataset}" == "kim" ]; then
-                        lambdas=1.0,0.0644
+                        lambdas=1.0,0.2581
                     else
-                        lambdas=1.0,0.0666
+                        lambdas=1.0,0.0678
                     fi
                 fi
 
                 if [ "${main_dataset}" == "scicite" ]; then
                     if [ "${aux_dataset}" == "acl" ]; then
-                        lambdas=1.0,0.1522
+                        lambdas=1.0,0.1803
                     else
-                        lambdas=1.0,0.0466
+                        lambdas=1.0,0.3353
                     fi
                 fi
 
