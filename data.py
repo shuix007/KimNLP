@@ -1,4 +1,5 @@
 import torch
+import scipy
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -7,12 +8,14 @@ from transformers import AutoTokenizer
 
 
 class Dataset(object):
-    def __init__(self, annotated_data, modelname, fuse_type, max_length=512):
+    def __init__(self, annotated_data, modelname, fuse_type, max_length=512, id2label=None):
         self.fuse_type = fuse_type
-        self.early_fuse = fuse_type in ['bruteforce']  # control the way to fetch
+        self.early_fuse = fuse_type in [
+            'bruteforce']  # control the way to fetch
         self.max_length = max_length if max_length > 0 else None
         self.truncation = (max_length > 0)
         self.tokenizer = AutoTokenizer.from_pretrained(modelname)
+        self.id2label = id2label
 
         self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
             'input_ids'].squeeze()[1:-1]
@@ -40,6 +43,40 @@ class Dataset(object):
                 self.citation_context_tokens[idx],
                 self.labels[idx]
             ]
+
+    def write_prediction(self, preds, filename1, filename2):
+        assert len(self.labels) == len(
+            preds), 'the length of labels should be the same with predictions.'
+
+        np_label_idx = self.labels.numpy()
+        pred_label_idx = preds.argmax(axis=1)
+        softmax_scores = np.exp(
+            preds) / np.exp(preds).sum(axis=1, keepdims=True)
+
+        ground_truth_labels = []
+        pred_labels = []
+        contexts = []
+
+        for i, context_tokens in enumerate(self.fused_citation_context_tokens):
+            ground_truth_labels.append(self.id2label[np_label_idx[i]])
+            pred_labels.append(self.id2label[pred_label_idx[i]])
+            contexts.append(self.tokenizer.decode(
+                context_tokens['input_ids'][0].tolist()))
+
+        pd.DataFrame({
+            'input_text': contexts,
+            'label': ground_truth_labels,
+            'pred_label': pred_labels
+        }).to_csv(filename1, index=False, header=True)
+
+        data_dict = {
+            'input_text': contexts,
+            'label': ground_truth_labels
+        }
+
+        for i in range(softmax_scores.shape[1]):
+            data_dict[self.id2label[i]] = softmax_scores[:, i]
+        pd.DataFrame(data_dict).to_csv(filename2, index=False, header=True)
 
     def __iter__(self):
         return self
@@ -152,7 +189,6 @@ class EmbeddedDataset(object):
             self._compute_early_fused_embeddings(dataset, lm_model)
         else:
             self._compute_late_fused_embeddings(dataset, lm_model)
-
 
     def get_label_weights(self):
         labels, counts = torch.unique(self.labels, return_counts=True)
@@ -415,7 +451,8 @@ def create_data_channels(filename, modelname, fuse_type, max_length):
         data_test,
         modelname=modelname,
         fuse_type=fuse_type,
-        max_length=max_length
+        max_length=max_length,
+        id2label=unique_labels
     )
 
     return train_data, val_data, test_data

@@ -2,9 +2,9 @@
 
 for SEED in 42 3515 4520
 do
-    for main_dataset in "kim" # "scicite" "acl" 
+    for main_dataset in "kim" "scicite" "acl" 
     do
-        for readout in "ch" # "cls" "mean" 
+        for readout in "mean" # "cls" "ch" 
         do
             # python ../main.py \
             #     --dataset=${main_dataset} \
@@ -33,6 +33,16 @@ do
                 --lm=scibert \
                 --one_step \
                 --seed=${SEED} &> onestep_main${main_dataset}_scibert_${readout}_seed${SEED}_log.txt
+
+            python ../main.py \
+                --dataset=${main_dataset} \
+                --data_dir=../../../Data/ \
+                --workspace=../Workspaces/onestep_main${main_dataset}_bert_${readout}_seed${SEED} \
+                --scheduler=slanted \
+                --context_readout=${readout} \
+                --lm=bert \
+                --one_step \
+                --seed=${SEED} &> onestep_main${main_dataset}_bert_${readout}_seed${SEED}_log.txt
             
             # python ../main.py \
             #     --dataset=${main_dataset} \

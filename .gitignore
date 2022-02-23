@@ -4,3 +4,5 @@
 **/Workspaces/
 **/PastLog*/
 *.txt
+*.csv
+*.png

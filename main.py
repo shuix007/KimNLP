@@ -2,16 +2,16 @@ import os
 # change the default cache dir so that huggingface won't take the cse space.
 os.environ['TRANSFORMERS_CACHE'] = '/export/scratch/zeren/KimNLP/HuggingfaceCache/'
 
-import argparse
-import torch
-import random
-import numpy as np
-
-from Model import LanguageModel, EarlyFuseClassifier, LateFuseClassifier, MLPClassifier, MultiHeadEarlyFuseClassifier, MultiHeadLateFuseClassifier
-from Model.layers import DenseLayer
-from data import EmbeddedDataset, MultiHeadDatasets, SingleHeadDatasets, SingleHeadEmbeddedDatasets, create_data_channels
-from train import Trainer, PreTrainer, MultiHeadTrainer, SingleHeadTrainer, SingleHeadPreTrainer
 from utils import save_args, select_activation_fn
+from train import Trainer, PreTrainer, MultiHeadTrainer, SingleHeadTrainer, SingleHeadPreTrainer
+from data import EmbeddedDataset, MultiHeadDatasets, SingleHeadDatasets, SingleHeadEmbeddedDatasets, create_data_channels
+from Model.layers import DenseLayer
+from Model import LanguageModel, EarlyFuseClassifier, LateFuseClassifier, MLPClassifier, MultiHeadEarlyFuseClassifier, MultiHeadLateFuseClassifier
+import numpy as np
+import random
+import torch
+import argparse
+
 
 def main_singlehead(args):
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
@@ -114,7 +114,7 @@ def main_singlehead(args):
         print('Finetuning LM + MLP.')
         finetuner.train()
         finetuner.load_model()
-        finetuner.test()
+        preds = finetuner.test()
     else:
         finetuner = SingleHeadTrainer(
             model,
@@ -125,7 +125,32 @@ def main_singlehead(args):
             args
         )
         finetuner.load_model()
-        finetuner.test()
+        preds = finetuner.test()
+
+    token_test_data.write_prediction(
+        preds,
+        os.path.join(
+            # args.workspace,
+            '_'.join([
+                args.dataset,
+                args.lm,
+                args.context_readout,
+                str(args.seed),
+                'predictions.csv'
+            ])
+        ),
+        os.path.join(
+            # args.workspace,
+            '_'.join([
+                args.dataset,
+                args.lm,
+                args.context_readout,
+                str(args.seed),
+                'scores.csv'
+            ])
+        )
+    )
+
 
 def main_multihead(args):
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
@@ -159,7 +184,8 @@ def main_multihead(args):
         token_test_data_list.append(aux_token_test_data)
 
     multihead_train_datasets = MultiHeadDatasets(token_train_data_list)
-    n_classes = [len(lb_weights) for lb_weights in multihead_train_datasets.get_label_weights()]
+    n_classes = [len(lb_weights)
+                 for lb_weights in multihead_train_datasets.get_label_weights()]
 
     lm_model = LanguageModel(
         modelname=modelname,
@@ -301,6 +327,6 @@ if __name__ == '__main__':
 
     if args.multitask == 'singlehead':
         main_singlehead(args)
-    
+
     if args.multitask == 'multihead':
         main_multihead(args)

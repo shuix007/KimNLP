@@ -138,6 +138,9 @@ class Trainer(object):
             labels = torch.cat(labels, dim=0).numpy()
 
             roc = self.compute_metrics(labels, preds)
+
+            if test:
+                return roc, preds
             return roc
 
     def train(self):
@@ -156,10 +159,11 @@ class Trainer(object):
                 break
 
     def test(self):
-        roc = self.eval_one_epoch(test=True)
+        roc, preds = self.eval_one_epoch(test=True)
         print('Test results:')
         print('Test roc: {:.4f}'.format(roc))
         print('Best val roc: {:.4f}'.format(self.best_roc))
+        return preds
 
     def save_model(self):
         model_filename = os.path.join(self.workspace, 'best_model.pt')
@@ -597,7 +601,7 @@ class SingleHeadTrainer(Trainer):
                 labels = torch.cat(labels, dim=0).numpy()
 
                 roc = self.compute_metrics(labels, preds)
-                return roc
+                return roc, preds
         else:  # for validation
             with torch.no_grad():
                 roc = list()
