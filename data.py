@@ -136,10 +136,11 @@ class Dataset(object):
 
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        if self.mode == 'context':
-            return (self.citation_context[idx], self.labels[idx])
-        elif self.mode == 'abstract':
-            return (self.citing_abstract[idx] + '<SEP>' + self.cited_abstract[idx], self.labels[idx])
+        # if self.mode == 'context':
+        #     return (self.citation_context[idx], self.labels[idx])
+        # elif self.mode == 'abstract':
+        #     return (self.citing_abstract[idx] + '<SEP>' + self.cited_abstract[idx], self.labels[idx])
+        return (self.text[idx], self.labels[idx])
 
     def write_prediction(self, preds, filename1, filename2):
         assert len(self.labels) == len(
@@ -189,6 +190,32 @@ class Dataset(object):
         self.citing_abstract = annotated_data['citing_abstract'].tolist()
         self.cited_abstract = annotated_data['cited_abstract'].tolist()
 
+        if self.mode == 'context':
+            self.text = self.citation_context
+        elif self.mode == 'abstract':
+            self.text = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
+        elif self.mode == 'all':
+            self.text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
+        elif self.mode == 'mix-abstract-all':
+            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
+            all_text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
+
+            self.text = abstract + all_text
+            self.labels = self.labels + self.labels
+        elif self.mode == 'mix-abstract-context':
+            context = self.citation_context
+            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
+
+            self.text = context + abstract
+            self.labels = self.labels + self.labels
+        elif self.mode == 'mix':
+            context = self.citation_context
+            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
+            all_text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
+
+            self.text = context + abstract + all_text
+            self.labels = self.labels + self.labels + self.labels
+
         self.labels = torch.LongTensor(self.labels)
 
 def create_data_channels(filename, mode):
@@ -219,13 +246,23 @@ def create_data_channels(filename, mode):
         data_val,
         mode=mode
     )
-    test_data = Dataset(
+    context_only_test_data = Dataset(
         data_test,
-        mode=mode,
+        mode='context',
+        id2label=unique_labels
+    )
+    abstract_only_test_data = Dataset(
+        data_test,
+        mode='abstract',
+        id2label=unique_labels
+    )
+    both_test_data = Dataset(
+        data_test,
+        mode='all',
         id2label=unique_labels
     )
 
-    return train_data, val_data, test_data
+    return train_data, val_data, (context_only_test_data, abstract_only_test_data, both_test_data)
 
 
 if __name__ == '__main__':

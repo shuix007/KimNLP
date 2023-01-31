@@ -53,8 +53,12 @@ class Trainer(object):
             train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=collate_fn)
         self.val_dataloader = DataLoader(
             val_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
-        self.test_dataloader = DataLoader(
-            test_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
+        self.context_only_test_dataloader = DataLoader(
+            test_dataset[0], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
+        self.abstract_only_test_dataloader = DataLoader(
+            test_dataset[1], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
+        self.both_test_dataloader = DataLoader(
+            test_dataset[2], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
 
         self.logger = SummaryWriter(
             os.path.join(self.workspace, 'log'))
@@ -97,8 +101,12 @@ class Trainer(object):
     def eval_one_epoch(self, test):
         self.model.eval()
 
-        if test:
-            data_loader = self.test_dataloader  # for inference
+        if test == 'context':
+            data_loader = self.context_only_test_dataloader  # for inference
+        elif test == 'abstract':
+            data_loader = self.abstract_only_test_dataloader
+        elif test == 'both':
+            data_loader = self.both_test_dataloader
         else:
             data_loader = self.val_dataloader  # for validation
 
@@ -107,13 +115,13 @@ class Trainer(object):
             for batched_text, label in data_loader:
                 preds.append(self.model(
                     batched_text
-                ).detach().cpu().numpy())
+                ).detach())
                 labels.append(label)
-            preds = np.concatenate(preds, axis=0)
+            preds = torch.cat(preds, dim=0).cpu().numpy()
             labels = torch.cat(labels, dim=0).numpy()
             metric = self.compute_metrics(labels, preds)
 
-            if test:
+            if test != 'val':
                 return metric, preds
             return metric
 
@@ -122,7 +130,7 @@ class Trainer(object):
             start = time.time()
             loss = self.train_one_epoch()
             end_train = time.time()
-            metric = self.eval_one_epoch(test=False)
+            metric = self.eval_one_epoch(test='val')
             end = time.time()
 
             self.log_tensorboard(metric, loss, epoch)
@@ -133,9 +141,11 @@ class Trainer(object):
                 break
 
     def test(self):
-        metric, preds = self.eval_one_epoch(test=True)
+        context_only_metric, preds = self.eval_one_epoch(test='context')
+        abstract_only_metric, preds = self.eval_one_epoch(test='abstract')
+        both_metric, preds = self.eval_one_epoch(test='both')
         print('Test results:')
-        print('Test metric: {:.4f}'.format(metric))
+        print('Context only test metric: {:.4f}, abstract only test metric: {:.4f}, both test metric: {:.4f}'.format(context_only_metric, abstract_only_metric, both_metric))
         print('Best val metric: {:.4f}'.format(self.best_metric))
         return preds
 

@@ -14,7 +14,13 @@ import argparse
 
 def main(args):
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
-    modelname = 'allenai/scibert_scivocab_uncased' if args.lm == 'scibert' else 'bert-base-uncased'
+
+    if args.lm == 'scibert':
+        modelname = 'allenai/scibert_scivocab_uncased'
+    elif args.lm == 'bert':
+        modelname = 'bert-base-uncased'
+    else:
+        modelname = args.lm
 
     train_data, val_data, test_data = create_data_channels(
         data_filename,
