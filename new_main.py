@@ -2,10 +2,10 @@ import os
 # change the default cache dir so that huggingface won't take the cse space.
 os.environ['TRANSFORMERS_CACHE'] = '/export/scratch/zeren/KimNLP/HuggingfaceCache/'
 
-from utils import save_args, select_activation_fn
+from utils import save_args
 from new_train import Trainer
-from new_data import create_data_channels
-from Model import LanguageModel, Classifier, MLP
+from data import create_data_channels
+from Model import LanguageModel
 import numpy as np
 import random
 import torch
@@ -15,46 +15,27 @@ import argparse
 def main(args):
     data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
     modelname = 'allenai/scibert_scivocab_uncased' if args.lm == 'scibert' else 'bert-base-uncased'
-    # modelname = args.lm
-    # hidden_dims = list(map(int, args.hidden_dims.split(',')))
 
-    token_train_data, token_val_data, token_test_data = create_data_channels(
+    train_data, val_data, test_data = create_data_channels(
         data_filename,
-        modelname,
-        max_length=args.max_length
+        mode=args.mode
     )
 
-    n_classes = len(token_train_data.get_label_weights())
+    n_classes = len(train_data.get_label_weights())
 
-    lm_model = LanguageModel(
+    model = LanguageModel(
         modelname=modelname,
         device=args.device,
         readout=args.readout,
-    ).to(args.device)
-
-    if args.use_abstract:
-        hidden_dims = 3 * 768
-    else:
-        hidden_dims = 768
-
-    mlp_model = MLP(
-        input_dims=hidden_dims,
-        n_classes=n_classes,
-        device=args.device
-    ).to(args.device)
-
-    model = Classifier(
-        lm_model=lm_model,
-        mlp_model=mlp_model,
-        use_abstract=args.use_abstract
+        num_classes=n_classes
     ).to(args.device)
 
     if not args.inference_only:
         finetuner = Trainer(
             model,
-            token_train_data,
-            token_val_data,
-            token_test_data,
+            train_data,
+            val_data,
+            test_data,
             args
         )
         print('Finetuning LM + MLP.')
@@ -64,9 +45,9 @@ def main(args):
     else:
         finetuner = Trainer(
             model,
-            token_train_data,
-            token_val_data,
-            token_test_data,
+            train_data,
+            val_data,
+            test_data,
             args
         )
         finetuner.load_model()
@@ -99,6 +80,7 @@ if __name__ == '__main__':
     parser.add_argument('--lm', default='bert', type=str)
     parser.add_argument('--max_length', default=512, type=int)
     parser.add_argument('--readout', default='mean', type=str)
+    parser.add_argument('--mode', default='context', type=str)
 
     args = parser.parse_args()
 
