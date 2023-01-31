@@ -8,7 +8,7 @@ from torch.optim import Adam, AdamW, lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from scipy.special import softmax
+# from scipy.special import softmax
 from sklearn.metrics import roc_auc_score, f1_score
 from scheduler import get_slanted_triangular_scheduler, get_linear_scheduler
 
