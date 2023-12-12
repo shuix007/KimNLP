@@ -15,10 +15,12 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=shuix007@umn.edu
 
-while getopts d: flag
+while getopts s:d:p: flag
 do
     case "${flag}" in
+        s) seed=${OPTARG};;
         d) data=${OPTARG};;
+        p) pl=${OPTARG};;
     esac
 done
 
@@ -31,4 +33,6 @@ CURRENTEPOCTIME=`date +"%Y-%m-%d-%H-%M-%S"`
 python main.py \
     --dataset=${data} \
     --data_dir=Data \
-    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-scibert &> ${CURRENTEPOCTIME}-${data}-scibert-log.txt
+    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${pl}-scibert \
+    --seed=${seed} \
+    --pl=${pl} &> ${CURRENTEPOCTIME}-${data}-${seed}-${pl}-scibert-log.txt

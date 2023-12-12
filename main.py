@@ -74,8 +74,12 @@ def main(args):
         aux_data.visualize_confusion_matrix(aux_preds, aux_label_map, model_label_map)
 
         print('Pseudo-labeling the auxiliary dataset.')
-        # aux_data.pseudo_label(aux_preds)
-        aux_data.update_label_with_selection(aux_preds)
+        if args.pl == 'pl':
+            aux_data.pseudo_label(aux_preds)
+        elif args.pl == 'pls':
+            aux_data.update_label_with_selection(aux_preds)
+        else:
+            raise NotImplementedError
         train_datasets = Datasets([train_data, aux_data])
 
         model = MultiHeadPsuedoLanguageModel(
@@ -121,6 +125,7 @@ if __name__ == '__main__':
 
     # model configuration
     parser.add_argument('--lm', default='scibert', type=str)
+    parser.add_argument('--pl', default='pls', type=str)
     parser.add_argument('--max_length', default=512, type=int)
     parser.add_argument('--readout', default='cls', type=str)
 

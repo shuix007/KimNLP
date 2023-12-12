@@ -7,3 +7,5 @@
 *.txt
 *.csv
 *.png
+*.err
+*.out
