@@ -19,7 +19,7 @@ N_CLASSES = {
 
 def main(args):
     # data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
-    datasets = args.dataset.split(',')
+    datasets = args.dataset.split('-')
     data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
 
     if args.lm == 'scibert':
