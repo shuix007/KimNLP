@@ -8,126 +8,49 @@ from tqdm import tqdm
 
 from transformers import AutoTokenizer
 
-def merge_annotations(x, y):
-    if type(y) == str:
-        return y.strip().lower()
-    return x.strip().lower()
-
-def process_contexts(text):
-    citing_contexts = str(text).split('---(1)---')[1].strip()
-    temp_citation_context_list = []
-    j = 2
-    while True:
-        citing_contexts = citing_contexts.split(
-            '---('+str(j)+')---')
-        temp_citation_context_list.append(
-            citing_contexts[0].strip())
-        if len(citing_contexts) == 1:
-            break
-        citing_contexts = citing_contexts[1].strip()
-        j += 1
-    return '[SEP]'.join(temp_citation_context_list)
-
-def load_kim_dataset(data_filename = '/export/scratch/zeren/KimNLP/RawData/dec_12_annotations.tsv'):
-    data = pd.read_csv(data_filename, sep='\t')
-
-    data['annotation'] = data.apply(lambda x: merge_annotations(x['previous annotation'], x['new annotation']), axis=1)
-    columns = ['cited doi', 'cited title', 'cited abstract', 'citing doi', 'citing title', 'citing abstract', 'citation context', 'annotation']
-    data = data[columns]
-    data = data.rename(columns={
-        'cited title': 'cited_title', 
-        'cited abstract': 'cited_abstract', 
-        'citing title': 'citing_title', 
-        'citing abstract': 'citing_abstract', 
-        'citation context': 'citation_context', 
-        'annotation': 'label'
-    }).reset_index().drop(columns=['index', 'cited_title', 'citing_title'])
-    data = data[data['label'] != 'not sure']
-    data = data.fillna('')
-    data['citation_context'] = data['citation_context'].apply(process_contexts)
-    # print(data['citation_context'].values[0])
-    print('kim: Number of instances: {}'.format(data.shape[0]))
-
-    num_train = int(data.shape[0] * 0.6)
-    num_val = int(data.shape[0] * 0.2)
-    num_test = data.shape[0] - num_train - num_val
-    
-    split = ['train'] * num_train + ['val'] * num_val + ['test'] * num_test
-    np.random.shuffle(split)
-
-    data['split'] = split
-    data.to_csv(
-        '/export/scratch/zeren/KimNLP/NewData/kim.tsv', 
-        sep='\t',
-        header=True,
-        index=False
-    )
-
-def load_acl_scicite_dataset(data_dir, data_name):
-    train_data_filename = os.path.join(
-        data_dir, '{}_train_with_abstracts.jsonl'.format(data_name)
-    )
-    test_data_filename = os.path.join(
-        data_dir, '{}_test_with_abstracts.jsonl'.format(data_name)
-    )
-
-    with open(train_data_filename, 'r') as train_f:
-        train_list = train_f.readlines()
-    
-    with open(test_data_filename, 'r') as test_f:
-        test_list = test_f.readlines()
-    
-    train_data = []
-    test_data = []
-    for json_str in train_list:
-        json_dict = json.loads(json_str)
-        train_data.append(json_dict)
-    
-    for json_str in test_list:
-        json_dict = json.loads(json_str)
-        test_data.append(json_dict)
-
-    train_df = pd.DataFrame(train_data).drop(columns=['cited_title', 'citing_title'])
-    test_df = pd.DataFrame(test_data).drop(columns=['cited_title', 'citing_title'])
-
-    print('{}: Number of instances: {}'.format(data_name, train_df.shape[0]+test_df.shape[0]))
-
-    train_df = train_df.fillna('')
-    test_df = test_df.fillna('')
-
-    num_train = int(train_df.shape[0] * 0.8)
-    num_val = train_df.shape[0] - num_train
-    num_test = test_df.shape[0]
-
-    train_split = ['train'] * num_train + ['val'] * num_val
-    test_split = ['test'] * num_test
-    np.random.shuffle(train_split)
-
-    train_df['split'] = train_split
-    test_df['split'] = test_split
-
-    data = pd.concat([train_df, test_df], axis=0)
-
-    data.to_csv(
-        '/export/scratch/zeren/KimNLP/NewData/{}.tsv'.format(data_name), 
-        sep='\t',
-        header=True, 
-        index=False
-    )
-
 class CollateFn(object):
     def __init__(self, modelname):
         self.tokenizer = AutoTokenizer.from_pretrained(modelname)
+        self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
+            'input_ids'].squeeze()[1:-1]
+
+    def _get_readout_mask(self, tokens):
+        # cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
+        readout_mask = torch.zeros_like(tokens['input_ids'], dtype=torch.bool)
+
+        batch_size = tokens['input_ids'].size(0)
+        l = tokens['input_ids'].size(1)
+        ctk_l = self.cited_here_tokens.size(0)
+        for b in range(batch_size):
+            for i in range(1, l - ctk_l):
+                if torch.equal(tokens['input_ids'][b, i:i+ctk_l], self.cited_here_tokens):
+                    readout_mask[b, i:i+ctk_l] = True
+        return readout_mask
+
+    def _tokenize_context(self, context):
+        tokens = self.tokenizer(
+            context,
+            return_tensors="pt",
+            max_length=512,
+            truncation=True,
+            padding=True
+        )
+        tokens['readout_mask'] = self._get_readout_mask(
+            tokens
+        )
+
+        return tokens
 
     def __call__(self, samples):
-        text, labels = list(map(list, zip(*samples)))
-        batched_text = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
+        text, labels, ds_indices, instance_weights = list(map(list, zip(*samples)))
+        batched_text = self._tokenize_context(text)
         labels = torch.stack(labels)
-        return batched_text, labels
+        ds_indices = torch.stack(ds_indices)
+        instance_weights = torch.stack(instance_weights)
+        return batched_text, labels, ds_indices, instance_weights
 
 class Dataset(object):
-    def __init__(self, dataframe, id2label=None, mode='context'):
-        self.mode = mode
+    def __init__(self, dataframe, id2label=None):
         self.id2label = id2label
         self._load_data(dataframe)
 
@@ -136,100 +59,75 @@ class Dataset(object):
 
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        # if self.mode == 'context':
-        #     return (self.citation_context[idx], self.labels[idx])
-        # elif self.mode == 'abstract':
-        #     return (self.citing_abstract[idx] + '<SEP>' + self.cited_abstract[idx], self.labels[idx])
-        return (self.text[idx], self.labels[idx])
+        return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
 
-    def write_prediction(self, preds, filename1, filename2):
-        assert len(self.labels) == len(
-            preds), 'the length of labels should be the same with predictions.'
+    def compute_confusion_matrix(self, preds):
+        this_label_space = len(np.unique(self.original_labels.numpy()))
+        model_label_space = preds.shape[1]
+        confusion_matrix = np.zeros((this_label_space, model_label_space), dtype=np.int64)
 
-        np_label_idx = self.labels.numpy()
         pred_label_idx = preds.argmax(axis=1)
-        softmax_scores = np.exp(
-            preds) / np.exp(preds).sum(axis=1, keepdims=True)
+        for i in range(len(self.original_labels)):
+            confusion_matrix[self.original_labels[i], pred_label_idx[i]] += 1
+        return confusion_matrix
 
-        ground_truth_labels = []
-        pred_labels = []
-        contexts = []
+    def visualize_confusion_matrix(self, preds, this_label_map, model_label_map):
+        confusion_matrix = self.compute_confusion_matrix(preds)
 
-        for i, context_tokens in enumerate(self.fused_citation_context_tokens):
-            ground_truth_labels.append(self.id2label[np_label_idx[i]])
-            pred_labels.append(self.id2label[pred_label_idx[i]])
-            contexts.append(self.tokenizer.decode(
-                context_tokens['input_ids'][0].tolist()))
+        df = pd.DataFrame(confusion_matrix, index=this_label_map, columns=model_label_map)
+        print(df)
 
-        pd.DataFrame({
-            'input_text': contexts,
-            'label': ground_truth_labels,
-            'pred_label': pred_labels
-        }).to_csv(filename1, index=False, header=True)
+    def pseudo_label(self, preds):
+        pred_label_idx = preds.argmax(axis=1)
+        self.labels = torch.LongTensor(pred_label_idx)
 
-        data_dict = {
-            'input_text': contexts,
-            'label': ground_truth_labels
-        }
+    def update_label_with_selection(self, preds):
+        confusion_matrix = self.compute_confusion_matrix(preds)
+        confusion_matrix = confusion_matrix / confusion_matrix.sum(axis=1, keepdims=True)
 
-        for i in range(softmax_scores.shape[1]):
-            data_dict[self.id2label[i]] = softmax_scores[:, i]
-        pd.DataFrame(data_dict).to_csv(filename2, index=False, header=True)
-
-    def get_label_weights(self):
-        labels, counts = torch.unique(self.labels, return_counts=True)
-
-        label_weights = torch.zeros_like(counts, dtype=torch.float32)
-        label_weights[labels] = counts.max() / counts
-
-        return label_weights
+        pred_label_idx = preds.argmax(axis=1)
+        self.labels = torch.LongTensor(pred_label_idx)
+        for i in range(len(pred_label_idx)):
+            self.instance_weights[i] = confusion_matrix[self.original_labels[i], pred_label_idx[i]]
 
     def _load_data(self, annotated_data):
-        self.labels = annotated_data['label'].tolist()
-        self.citation_context = annotated_data['citation_context'].tolist()
-        self.citing_abstract = annotated_data['citing_abstract'].tolist()
-        self.cited_abstract = annotated_data['cited_abstract'].tolist()
+        self.labels = torch.LongTensor(annotated_data['label'].tolist())
+        self.original_labels = torch.LongTensor(annotated_data['label'].tolist())
+        self.ds_index = torch.zeros_like(self.original_labels)
+        self.instance_weights = torch.ones_like(self.original_labels).float()
+        self.text = annotated_data['context'].tolist()
 
-        if self.mode == 'context':
-            self.text = self.citation_context
-        elif self.mode == 'abstract':
-            self.text = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
-        elif self.mode == 'all':
-            self.text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
-        elif self.mode == 'mix-abstract-all':
-            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
-            all_text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
+class Datasets(object):
+    def __init__(self, datasets):
+        self.text = []
+        # self.ds_index = []
+        self.labels = []
+        self.instance_weights = []
+        for i, d in enumerate(datasets):
+            self.text += d.text
+            # self.ds_index.append(torch.full(len(d.text), i, dtype=torch.long))
+            self.labels.append(d.labels)
+            self.instance_weights.append(d.instance_weights)
+        self.labels = torch.cat(self.labels, dim=0)
+        self.instance_weights = torch.cat(self.instance_weights, dim=0)
+        self.ds_index = torch.zeros_like(self.labels) # torch.cat(self.ds_index, dim=0)
+    
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, idx):
+        '''Get datapoint with index'''
+        return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
 
-            self.text = abstract + all_text
-            self.labels = self.labels + self.labels
-        elif self.mode == 'mix-abstract-context':
-            context = self.citation_context
-            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
-
-            self.text = context + abstract
-            self.labels = self.labels + self.labels
-        elif self.mode == 'mix':
-            context = self.citation_context
-            abstract = [citing_abs + '<SEP>' + cited_abs for citing_abs, cited_abs in zip(self.citing_abstract, self.cited_abstract)]
-            all_text = [context + '<SEP>' + citing_abs + '<SEP>' + cited_abs for context, citing_abs, cited_abs in zip(self.citation_context, self.citing_abstract, self.cited_abstract)]
-
-            self.text = context + abstract + all_text
-            self.labels = self.labels + self.labels + self.labels
-
-        self.labels = torch.LongTensor(self.labels)
-
-def create_data_channels(filename, mode):
+def create_data_channels(filename, split=None):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
     print('Number of data instance: {}'.format(data.shape[0]))
 
     # map labels to ids
-    unique_labels = data['label'].unique()
-    if 'used' in unique_labels:
-        label2id = {'used': 1, 'not used': 0, 'extended': 0}  # binary for now
-    else:
-        label2id = {lb: i for i, lb in enumerate(unique_labels)}
+    unique_labels = data['label'].unique().tolist()
+    label2id = {lb: i for i, lb in enumerate(unique_labels)}
     
     data['label'] = data['label'].apply(
         lambda x: label2id[x])
@@ -238,34 +136,26 @@ def create_data_channels(filename, mode):
     data_val = data[data['split'] == 'val'].reset_index()
     data_test = data[data['split'] == 'test'].reset_index()
 
-    train_data = Dataset(
-        data_train,
-        mode=mode
-    )
-    val_data = Dataset(
-        data_val,
-        mode=mode
-    )
-    context_only_test_data = Dataset(
-        data_test,
-        mode='context',
-        id2label=unique_labels
-    )
-    abstract_only_test_data = Dataset(
-        data_test,
-        mode='abstract',
-        id2label=unique_labels
-    )
-    both_test_data = Dataset(
-        data_test,
-        mode='all',
-        id2label=unique_labels
-    )
+    train_data = Dataset(data_train)
+    val_data = Dataset(data_val)
+    test_data = Dataset(data_test)
 
-    return train_data, val_data, (context_only_test_data, abstract_only_test_data, both_test_data)
+    return train_data, val_data, test_data, unique_labels
 
+def create_single_data_object(filename, split=None):
+    data = pd.read_csv(filename, sep='\t')
+    data = data.fillna(' ')
 
-if __name__ == '__main__':
-    load_kim_dataset()
-    load_acl_scicite_dataset('/export/scratch/zeren/KimNLP/RawData/datasets', 'acl_arc')
-    load_acl_scicite_dataset('/export/scratch/zeren/KimNLP/RawData/datasets', 'scicite')
+    print('Number of data instance: {}'.format(data.shape[0]))
+
+    # map labels to ids
+    unique_labels = data['label'].unique()
+    label2id = {lb: i for i, lb in enumerate(unique_labels)}
+    
+    data['label'] = data['label'].apply(
+        lambda x: label2id[x])
+
+    if split is None:
+        return Dataset(data), unique_labels
+    else:
+        return Dataset(data[data['split'] == split].reset_index()), unique_labels

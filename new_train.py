@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 # from scipy.special import softmax
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix
 from data import CollateFn
 from scheduler import get_slanted_triangular_scheduler, get_linear_scheduler
 
@@ -24,8 +24,9 @@ class Trainer(object):
         self.workspace = args.workspace
         self.model = model
 
-        self.loss_fn = nn.CrossEntropyLoss(
-            weight=train_dataset.get_label_weights().to(self.device))
+        # self.loss_fn = nn.CrossEntropyLoss(
+        #     weight=train_dataset.get_label_weights().to(self.device))
+        self.loss_fn = nn.CrossEntropyLoss(reduction='none')
 
         self.optimizer = AdamW(self.model.parameters(),
                                 lr=args.lr, weight_decay=args.l2)
@@ -48,17 +49,13 @@ class Trainer(object):
         print('Using {} scheduler.'.format(args.scheduler))
 
         modelname = 'allenai/scibert_scivocab_uncased' if args.lm == 'scibert' else 'bert-base-uncased'
-        collate_fn = CollateFn(modelname=modelname)
+        self.collate_fn = CollateFn(modelname=modelname)
         self.train_dataloader = DataLoader(
-            train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=collate_fn)
+            train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
         self.val_dataloader = DataLoader(
-            val_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
-        self.context_only_test_dataloader = DataLoader(
-            test_dataset[0], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
-        self.abstract_only_test_dataloader = DataLoader(
-            test_dataset[1], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
-        self.both_test_dataloader = DataLoader(
-            test_dataset[2], batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
+            val_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
+        self.test_dataloader = DataLoader(
+            test_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
 
         self.logger = SummaryWriter(
             os.path.join(self.workspace, 'log'))
@@ -66,8 +63,19 @@ class Trainer(object):
         self.best_epoch = 0
         self.best_metric = 0.
 
-    def compute_loss(self, labels, logits):
-        return self.loss_fn(logits, labels)
+    def update_train_dataset(self, train_dataset):
+        self.train_dataloader = DataLoader(
+            train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
+
+    def compute_loss(self, labels, logits, ds_indices, instance_weights):
+        losses = []
+        for ds_idx in logits.keys():
+            if len(logits[ds_idx]) > 0:
+                losses.append(
+                    (self.loss_fn(logits[ds_idx], labels[ds_indices == ds_idx]) * instance_weights[ds_indices == ds_idx]).sum() / instance_weights[ds_indices == ds_idx].sum()
+                )
+        loss = sum(losses)
+        return loss
 
     def compute_metrics(self, labels, logits):
         return f1_score(labels, logits.argmax(axis=1), average='macro')
@@ -86,10 +94,13 @@ class Trainer(object):
         total_loss = 0.
         self.model.train()
 
-        for batched_text, labels in self.train_dataloader:
+        for batched_text, labels, ds_indices, instance_weights in self.train_dataloader:
             labels = labels.to(self.device)
-            preds = self.model(batched_text)
-            loss = self.compute_loss(labels, preds)
+            ds_indices = ds_indices.to(self.device)
+            instance_weights = instance_weights.to(self.device)
+
+            preds = self.model(batched_text, ds_indices)
+            loss = self.compute_loss(labels, preds, ds_indices, instance_weights)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -98,30 +109,29 @@ class Trainer(object):
 
         return total_loss / len(self.train_dataloader)
 
-    def eval_one_epoch(self, test):
+    def eval_one_epoch(self, return_preds=False, test=False, outside_dataloader=None):
         self.model.eval()
 
-        if test == 'context':
-            data_loader = self.context_only_test_dataloader  # for inference
-        elif test == 'abstract':
-            data_loader = self.abstract_only_test_dataloader
-        elif test == 'both':
-            data_loader = self.both_test_dataloader
+        if outside_dataloader is not None:
+            data_loader = outside_dataloader
         else:
-            data_loader = self.val_dataloader  # for validation
+            if test:
+                data_loader = self.test_dataloader
+            else:
+                data_loader = self.val_dataloader  # for validation
 
         preds, labels = list(), list()
         with torch.no_grad():
-            for batched_text, label in data_loader:
+            for batched_text, label, ds_indices, instance_weights in data_loader:
                 preds.append(self.model(
-                    batched_text
-                ).detach())
+                    batched_text, ds_indices
+                )[0])
                 labels.append(label)
             preds = torch.cat(preds, dim=0).cpu().numpy()
             labels = torch.cat(labels, dim=0).numpy()
             metric = self.compute_metrics(labels, preds)
 
-            if test != 'val':
+            if return_preds:
                 return metric, preds
             return metric
 
@@ -130,7 +140,7 @@ class Trainer(object):
             start = time.time()
             loss = self.train_one_epoch()
             end_train = time.time()
-            metric = self.eval_one_epoch(test='val')
+            metric = self.eval_one_epoch(test=False)
             end = time.time()
 
             self.log_tensorboard(metric, loss, epoch)
@@ -140,14 +150,18 @@ class Trainer(object):
             if self.early_stop(metric=metric, epoch=epoch):
                 break
 
-    def test(self):
-        context_only_metric, preds = self.eval_one_epoch(test='context')
-        abstract_only_metric, preds = self.eval_one_epoch(test='abstract')
-        both_metric, preds = self.eval_one_epoch(test='both')
-        print('Test results:')
-        print('Context only test metric: {:.4f}, abstract only test metric: {:.4f}, both test metric: {:.4f}'.format(context_only_metric, abstract_only_metric, both_metric))
-        print('Best val metric: {:.4f}'.format(self.best_metric))
-        return preds
+    def test(self, outside_dataset=None):
+        if outside_dataset is not None:
+            outside_dataloader = DataLoader(
+                outside_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
+            _, test_preds = self.eval_one_epoch(
+                return_preds=True, outside_dataloader=outside_dataloader, test=False)
+        else:
+            test_metric, test_preds = self.eval_one_epoch(return_preds=True, test=True)
+            print('Test results:')
+            print('Test metric: {:.4f}.'.format(test_metric))
+            print('Best val metric: {:.4f}'.format(self.best_metric))
+        return test_preds
 
     def save_model(self):
         model_filename = os.path.join(self.workspace, 'best_model.pt')

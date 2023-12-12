@@ -1,19 +1,26 @@
 import os
 # change the default cache dir so that huggingface won't take the cse space.
-os.environ['TRANSFORMERS_CACHE'] = '/export/scratch/zeren/KimNLP/HuggingfaceCache/'
+os.environ['TRANSFORMERS_CACHE'] = '/mnt/nvme1n1/zeren/HuggingfaceCache/'
 
 from utils import save_args
 from new_train import Trainer
-from data import create_data_channels
-from Model import LanguageModel
+from data import create_data_channels, create_single_data_object, Datasets
+from Model import LanguageModel, MultiHeadPsuedoLanguageModel
 import numpy as np
 import random
 import torch
 import argparse
 
+N_CLASSES = {
+    'kim': 3,
+    'acl': 6,
+    'scicite': 3
+}
 
 def main(args):
-    data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
+    # data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
+    datasets = args.dataset.split(',')
+    data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
 
     if args.lm == 'scibert':
         modelname = 'allenai/scibert_scivocab_uncased'
@@ -22,18 +29,19 @@ def main(args):
     else:
         modelname = args.lm
 
-    train_data, val_data, test_data = create_data_channels(
-        data_filename,
-        mode=args.mode
+    train_data, val_data, test_data, model_label_map = create_data_channels(
+        data_filenames[0]
     )
+    if len(data_filenames) > 1:
+        aux_data, aux_label_map = create_single_data_object(
+            data_filenames[1], split='train'
+        )
 
-    n_classes = len(train_data.get_label_weights())
-
-    model = LanguageModel(
+    model = MultiHeadPsuedoLanguageModel(
         modelname=modelname,
         device=args.device,
         readout=args.readout,
-        num_classes=n_classes
+        num_classes=[N_CLASSES[datasets[0]]] # [N_CLASSES[ds] for ds in datasets]
     ).to(args.device)
 
     if not args.inference_only:
@@ -59,6 +67,35 @@ def main(args):
         finetuner.load_model()
         preds = finetuner.test()
 
+    for i in range(10):
+        # model.print_label_space_mapping(label_maps)
+        print('The {}-th PL iteration.'.format(i))
+        aux_preds = finetuner.test(outside_dataset=aux_data)
+        aux_data.visualize_confusion_matrix(aux_preds, aux_label_map, model_label_map)
+
+        print('Pseudo-labeling the auxiliary dataset.')
+        # aux_data.pseudo_label(aux_preds)
+        aux_data.update_label_with_selection(aux_preds)
+        train_datasets = Datasets([train_data, aux_data])
+
+        model = MultiHeadPsuedoLanguageModel(
+            modelname=modelname,
+            device=args.device,
+            readout=args.readout,
+            num_classes=[N_CLASSES[datasets[0]]] # [N_CLASSES[ds] for ds in datasets]
+        ).to(args.device)
+
+        finetuner = Trainer(
+            model,
+            train_datasets,
+            val_data,
+            test_data,
+            args
+        )
+        print('Finetuning LM + MLP with pseudo-labels.')
+        finetuner.train()
+        finetuner.load_model()
+        preds = finetuner.test()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -68,8 +105,8 @@ if __name__ == '__main__':
     parser.add_argument('--workspace', required=True)
 
     # training configuration
-    parser.add_argument('--batch_size', default=16, type=int)
-    parser.add_argument('--lr', default=2e-5, type=float)
+    parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--lr', default=5e-5, type=float)
     parser.add_argument('--decay_rate', default=0.5, type=float)
     parser.add_argument('--decay_step', default=5, type=int)
     parser.add_argument('--num_epochs', default=10, type=int)
@@ -83,10 +120,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=42, type=int)  # seed = 1209384756
 
     # model configuration
-    parser.add_argument('--lm', default='bert', type=str)
+    parser.add_argument('--lm', default='scibert', type=str)
     parser.add_argument('--max_length', default=512, type=int)
-    parser.add_argument('--readout', default='mean', type=str)
-    parser.add_argument('--mode', default='context', type=str)
+    parser.add_argument('--readout', default='cls', type=str)
 
     args = parser.parse_args()
 
