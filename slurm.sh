@@ -1,15 +1,15 @@
 #!/bin/bash -l
 
 #SBATCH -p gk
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:1
 
-#SBATCH -o log.txt
-#SBATCH -e error.txt
+#SBATCH --output=result-%j.out
+#SBATCH --error=result-%j.err
 
 #SBATCH --time=4:00:00
 
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks=1
 
 #SBATCH --mem=10G
 
