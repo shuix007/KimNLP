@@ -1,179 +1,146 @@
+import os
 import torch
 import torch.nn as nn
 
 from transformers import AutoModel
 from .layers import DenseLayer
 
+def mask_pooling(model_output, attention_mask):
+    token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
 class LanguageModel(nn.Module):
-    def __init__(self, modelname, device, rawtext_readout, context_readout, intra_context_pooling):
+    def __init__(self, modelname, device, readout, num_classes):
         super(LanguageModel, self).__init__()
         self.device = device
         self.modelname = modelname
-        self.rawtext_readout = rawtext_readout
-        self.context_readout = context_readout
-        self.intra_context_pooling = intra_context_pooling
-
-        assert self.rawtext_readout in [
-            'cls', 'mean'], 'Raw text readout type {} is not supported.'.format(self.rawtext_readout)
-        assert self.context_readout in [
-            'cls', 'mean', 'ch'], 'Context Readout type {} is not supported.'.format(self.context_readout)
-        assert self.intra_context_pooling in [
-            'max', 'mean', 'sum'], 'Pooling type {} is not supported.'.format(self.intra_context_pooling)
+        self.readout = readout
+        self.num_classes = num_classes
 
         self.model = AutoModel.from_pretrained(modelname)
         self.hidden_size = self.model.config.hidden_size
 
-    def _context_readout(self, lm_output, readout_mask=None):
-        bert_dims = lm_output.last_hidden_state.size(-1)
+        self.ln = nn.Linear(self.hidden_size, num_classes)
 
-        if self.context_readout == 'cls':
-            return lm_output.last_hidden_state[0, 0]
-        elif self.context_readout == 'mean':
-            return lm_output.last_hidden_state[0].mean(0)
-        elif self.context_readout == 'ch':
-            if readout_mask is not None:
-                result = lm_output.last_hidden_state[readout_mask].view(
-                    -1, 4, bert_dims).mean(dim=1)
-                if self.intra_context_pooling == 'max':
-                    return result.max(dim=0).values
-                elif self.intra_context_pooling == 'mean':
-                    return result.mean(dim=0)
-                elif self.intra_context_pooling == 'sum':
-                    return result.sum(dim=0)
-            else:
-                raise ValueError('Cited Here readout requires readout_index.')
+    def forward(self, tokens):
+        tokens = tokens.to(self.device)
+        readout_mask = tokens.pop('readout_mask')
+        outputs = self.model(**tokens)
 
-    def _to_device(self, input_dict):
-        output_dict = {}
-        for key, value in input_dict.items():
-            output_dict[key] = value.to(self.device) if len(
-                value.size()) == 2 else value.to(self.device).squeeze(0)
-        return output_dict
+        if self.readout == 'cls':
+            text_representations = outputs.last_hidden_state[:, 0]
+        elif self.readout == 'mean':
+            text_representations = mask_pooling(outputs, tokens['attention_mask'])
+        elif self.readout == 'ch':
+            text_representations = mask_pooling(outputs, readout_mask)
+        
+        preds = self.ln(text_representations)
+        return preds
 
-    def forward(self, input_dict):
-        if self.rawtext_readout == 'cls':
-            return self.model(**self._to_device(input_dict)).last_hidden_state[0, 0]
-        elif self.rawtext_readout == 'mean':
-            return self.model(**self._to_device(input_dict)).last_hidden_state[0].mean(dim=0)
-
-    def context_forward(self, input_dict):
-        input_dict_device = self._to_device(input_dict)
-        readout_mask = input_dict_device.pop('readout_mask')
-
-        lm_output = self.model(**input_dict_device)
-        return self._context_readout(lm_output=lm_output, readout_mask=readout_mask)
+    # def compute_loss(self, tokens, labels):
+    #     preds = self.forward(tokens)
+    #     return self.loss_fn(preds, labels)
 
     def save_pretrained(self, modeldir):
-        self.model.save_pretrained(modeldir)
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        torch.save(self.state_dict(), model_filename)
 
+    def load_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        self.load_state_dict(torch.load(model_filename))
 
-class EarlyFuseMLPClassifier(nn.Module):
-    def __init__(self, input_dims, hidden_list, n_classes, activation, dropout, device):
-        super(EarlyFuseMLPClassifier, self).__init__()
+class MultiHeadLanguageModel(nn.Module):
+    def __init__(self, modelname, device, readout, num_classes):
+        super(LanguageModel, self).__init__()
         self.device = device
-        self.n_classes = n_classes
-        self.n_layers = len(hidden_list)
-        self.hidden_layers = nn.ModuleList([])
-        input_ = input_dims
-        for i in range(len(hidden_list)):
-            self.hidden_layers.append(DenseLayer(
-                input_, hidden_list[i], activation=activation, bias=True))
-            input_ = hidden_list[i]
-        self.top_layer = DenseLayer(hidden_list[-1], n_classes)
-        self.dropout = nn.Dropout(dropout)
+        self.modelname = modelname
+        self.readout = readout
+        self.num_classes = num_classes
 
-    def forward(self, fused_context_embeds):
-        hidden = fused_context_embeds.to(self.device)
-        for layer in self.hidden_layers:
-            hidden = self.dropout(layer(hidden))
-        logits = self.top_layer(hidden)
-        return logits
+        self.model = AutoModel.from_pretrained(modelname)
+        self.hidden_size = self.model.config.hidden_size
 
+        self.lns = nn.ModuleList([nn.Linear(self.hidden_size, num_class) for num_class in num_classes])
 
-class LateFuseMLPCLassifier(nn.Module):
-    def __init__(self, input_dims, hidden_list, n_classes, activation, dropout, device):
-        super(LateFuseMLPCLassifier, self).__init__()
+    def forward(self, tokens, head_indices):
+        tokens = tokens.to(self.device)
+        readout_mask = tokens.pop('readout_mask')
+        outputs = self.model(**tokens)
+
+        if self.readout == 'cls':
+            text_representations = outputs.last_hidden_state[:, 0]
+        elif self.readout == 'mean':
+            text_representations = mask_pooling(outputs, tokens['attention_mask'])
+        elif self.readout == 'ch':
+            text_representations = mask_pooling(outputs, readout_mask)
+        
+        preds = {}
+        for i in range(len(self.lns)):
+            per_head_text_representations = text_representations[head_indices == i]
+            preds[i] = self.lns[i](per_head_text_representations)
+        return preds
+
+    def save_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        torch.save(self.state_dict(), model_filename)
+
+    def load_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        self.load_state_dict(torch.load(model_filename))
+
+class MultiHeadPsuedoLanguageModel(nn.Module):
+    def __init__(self, modelname, device, readout, num_classes):
+        super(MultiHeadPsuedoLanguageModel, self).__init__()
         self.device = device
-        self.n_classes = n_classes
-        self.n_layers = len(hidden_list)
-        self.hidden_layers = nn.ModuleList()
-        input_ = input_dims * 5
-        for i in range(len(hidden_list)):
-            self.hidden_layers.append(DenseLayer(
-                input_, hidden_list[i], activation=activation, bias=True))
-            input_ = hidden_list[i]
-        self.top_layer = DenseLayer(hidden_list[-1], n_classes)
-        self.dropout = nn.Dropout(dropout)
+        self.modelname = modelname
+        self.readout = readout
+        self.num_classes = num_classes
+        self.target_num_classes = num_classes[0]
 
-    def forward(self, cited_title_embeds, cited_abstract_embeds, citing_title_embeds, citing_abstract_embeds, citation_context_embeds):
-        hidden = torch.cat([
-            cited_title_embeds.to(self.device),
-            cited_abstract_embeds.to(self.device),
-            citing_title_embeds.to(self.device),
-            citing_abstract_embeds.to(self.device),
-            citation_context_embeds.to(self.device)
-        ], dim=-1)
+        self.model = AutoModel.from_pretrained(modelname)
+        self.hidden_size = self.model.config.hidden_size
 
-        for layer in self.hidden_layers:
-            hidden = self.dropout(layer(hidden))
-        logits = self.top_layer(hidden)
-        return logits
+        self.ln = nn.Linear(self.hidden_size, self.target_num_classes)
+        if len(self.num_classes) > 1:
+            self.label_space_mappings = nn.ParameterDict()
+            for i in range(1, len(self.num_classes)):
+                label_space_mapping = nn.Parameter(torch.randn(self.target_num_classes, self.num_classes[i]))
+                self.label_space_mappings[str(i)] = label_space_mapping
 
+    def forward(self, tokens, head_indices):
+        tokens = tokens.to(self.device)
+        readout_mask = tokens.pop('readout_mask')
+        outputs = self.model(**tokens)
 
-class EarlyFuseClassifier(nn.Module):
-    def __init__(self, lm_model, mlp_model):
-        super(EarlyFuseClassifier, self).__init__()
-        self.lm_model = lm_model
-        self.mlp_model = mlp_model
+        if self.readout == 'cls':
+            text_representations = outputs.last_hidden_state[:, 0]
+        elif self.readout == 'mean':
+            text_representations = mask_pooling(outputs, tokens['attention_mask'])
+        elif self.readout == 'ch':
+            text_representations = mask_pooling(outputs, readout_mask)
+        
+        preds = self.ln(text_representations)
 
-    def forward(self, fused_text_tokens):
-        lm_output = self.lm_model.context_forward(
-            fused_text_tokens).unsqueeze(0)
-        logits = self.mlp_model(lm_output)
-        return logits
+        final_preds = {0: preds[head_indices == 0]}
+        if len(self.num_classes) > 1:
+            for i in range(1, len(self.num_classes)):
+                per_head_preds = preds[head_indices == i]
+                final_preds[i] = torch.matmul(per_head_preds, torch.softmax(self.label_space_mappings[str(i)], dim=1))
 
+        return final_preds
 
-class LateFuseClassifier(nn.Module):
-    def __init__(self, lm_model, mlp_model, inter_context_pooling):
-        super(LateFuseClassifier, self).__init__()
-        self.lm_model = lm_model
-        self.mlp_model = mlp_model
+    def print_label_space_mapping(self, label_maps):
+        for i in range(1, len(self.num_classes)):
+            label_space_projection = torch.softmax(self.label_space_mappings[str(i)], dim=1).detach().cpu().tolist()
+            print(', '.join(label_maps[i]))
+            for j in range(len(label_space_projection)):
+                print(', '.join([str(x) for x in label_space_projection[j]] + [label_maps[0][j]]))
 
-        self.inter_context_pooling = inter_context_pooling
-        assert self.inter_context_pooling in [
-            'sum', 'max', 'mean', 'topk'], 'Inter context pooling type {} not supported'.format(self.inter_context_pooling)
+    def save_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        torch.save(self.state_dict(), model_filename)
 
-    def forward(self, cited_title_tokens, cited_abstract_tokens, citing_title_tokens, citing_abstract_tokens, citation_context_tokens):
-        cited_title_embeds = self.lm_model(cited_title_tokens)
-        cited_abstract_embeds = self.lm_model(cited_abstract_tokens)
-        citing_title_embeds = self.lm_model(citing_title_tokens)
-        citing_abstract_embeds = self.lm_model(citing_abstract_tokens)
-
-        citation_context_embeds = list()
-        for context in citation_context_tokens:
-            context_embed = self.lm_model.context_forward(context)
-            citation_context_embeds.append(context_embed)
-        citation_context_embeds = torch.stack(citation_context_embeds)
-
-        if self.inter_context_pooling == 'sum':
-            citation_context_embeds = citation_context_embeds.sum(
-                dim=0)
-        elif self.inter_context_pooling == 'max':
-            citation_context_embeds = citation_context_embeds.max(
-                dim=0).values
-        elif self.inter_context_pooling == 'mean':
-            citation_context_embeds = citation_context_embeds.mean(
-                dim=0)
-        elif self.inter_context_pooling == 'topk':
-            topk = citation_context_embeds.topk(10, dim=0)
-            citation_context_embeds = topk[0].mean(dim=0)
-
-        logits = self.mlp_model(
-            cited_title_embeds.unsqueeze(0),
-            cited_abstract_embeds.unsqueeze(0),
-            citing_title_embeds.unsqueeze(0),
-            citing_abstract_embeds.unsqueeze(0),
-            citation_context_embeds.unsqueeze(0)
-        )
-        return logits
+    def load_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        self.load_state_dict(torch.load(model_filename))

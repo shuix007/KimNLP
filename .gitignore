@@ -1,5 +1,9 @@
 **/.vscode/
 **/__pycache__/
-**/Data/
 **/Workspaces/
+**/results/
+**/PastLog*/
+**/Notebooks/
 *.txt
+*.csv
+*.png
