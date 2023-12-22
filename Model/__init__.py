@@ -1,1 +1,1 @@
-from .model import LanguageModel, MultiHeadPsuedoLanguageModel
+from .model import LanguageModel, MultiHeadPsuedoLanguageModel, MultiHeadContrastiveLanguageModel

@@ -3,9 +3,9 @@ import os
 os.environ['TRANSFORMERS_CACHE'] = '/mnt/nvme1n1/zeren/HuggingfaceCache/'
 
 from utils import save_args
-from trainer import Trainer
-from data import create_data_channels, create_single_data_object, Datasets
-from Model import LanguageModel, MultiHeadPsuedoLanguageModel
+from trainer import Trainer, MultiHeadTrainer
+from data import create_data_channels, create_single_data_object, Datasets, MultiHeadDatasets
+from Model import LanguageModel, MultiHeadPsuedoLanguageModel, MultiHeadContrastiveLanguageModel
 import numpy as np
 import random
 import torch
@@ -17,7 +17,7 @@ N_CLASSES = {
     'scicite': 3
 }
 
-def main(args):
+def main_pl(args):
     # data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
     datasets = args.dataset.split('-')
     data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
@@ -30,11 +30,12 @@ def main(args):
         modelname = args.lm
 
     train_data, val_data, test_data, model_label_map = create_data_channels(
-        data_filenames[0]
+        data_filenames[0],
+        args.class_definition
     )
     if len(data_filenames) > 1:
         aux_data, aux_label_map = create_single_data_object(
-            data_filenames[1], split='train'
+            data_filenames[1], args.class_definition, split='train'
         )
 
     model = MultiHeadPsuedoLanguageModel(
@@ -101,12 +102,67 @@ def main(args):
         finetuner.load_model()
         preds = finetuner.test()
 
+def main_cl(args):
+    # data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
+    datasets = args.dataset.split('-')
+    data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
+
+    if args.lm == 'scibert':
+        modelname = 'allenai/scibert_scivocab_uncased'
+    elif args.lm == 'bert':
+        modelname = 'bert-base-uncased'
+    else:
+        modelname = args.lm
+
+    train_data, val_data, test_data, model_label_map = create_data_channels(
+        data_filenames[0],
+        args.class_definition
+    )
+    train_datasets_list = [train_data]
+    if len(data_filenames) > 1:
+        for data_filename in data_filenames[1:]:
+            aux_data, aux_label_map = create_single_data_object(
+                data_filename, args.class_definition, split='train'
+            )
+            train_datasets_list.append(aux_data)
+    train_datasets = MultiHeadDatasets(train_datasets_list)
+
+    model = MultiHeadContrastiveLanguageModel(
+        modelname=modelname,
+        device=args.device,
+        readout=args.readout
+    ).to(args.device)
+
+    if not args.inference_only:
+        finetuner = MultiHeadTrainer(
+            model,
+            train_datasets,
+            val_data,
+            test_data,
+            args
+        )
+        print('Finetuning LM + MLP.')
+        finetuner.train()
+        finetuner.load_model()
+        preds = finetuner.test()
+    else:
+        finetuner = MultiHeadTrainer(
+            model,
+            train_datasets,
+            val_data,
+            test_data,
+            args
+        )
+        finetuner.load_model()
+        preds = finetuner.test()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data configuration
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--data_dir', required=True)
     parser.add_argument('--workspace', required=True)
+    parser.add_argument('--class_definition', default='Data/class_def.json', type=str)
 
     # training configuration
     parser.add_argument('--batch_size', default=32, type=int)
@@ -144,4 +200,5 @@ if __name__ == '__main__':
         os.mkdir(args.workspace)
     save_args(args, args.workspace)
 
-    main(args)
+    # main_pl(args)
+    main_cl(args)

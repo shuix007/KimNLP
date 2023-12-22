@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import numpy as np
 
 import torch
@@ -16,6 +17,7 @@ from scheduler import get_slanted_triangular_scheduler, get_linear_scheduler
 
 class Trainer(object):
     def __init__(self, model, train_dataset, val_dataset, test_dataset, args):
+        self.args = args
         self.device = args.device
         self.batch_size = args.batch_size
         self.num_epochs = args.num_epochs
@@ -24,32 +26,25 @@ class Trainer(object):
         self.workspace = args.workspace
         self.model = model
 
-        # self.loss_fn = nn.CrossEntropyLoss(
-        #     weight=train_dataset.get_label_weights().to(self.device))
+        self.load(train_dataset, val_dataset, test_dataset)
+
+    def load(self, train_dataset, val_dataset, test_dataset):
+        self.load_datasets(train_dataset, val_dataset, test_dataset)
+        self.load_losses()
+        self.load_optimizer()
+        self.load_scheduler()
+        self.load_logger()
+
+    def load_losses(self):
         self.loss_fn = nn.CrossEntropyLoss(reduction='none')
 
-        self.optimizer = AdamW(self.model.parameters(),
-                                lr=args.lr, weight_decay=args.l2)
-
-        if args.scheduler == 'exp':
-            self.scheduler = lr_scheduler.StepLR(
-                self.optimizer, step_size=args.decay_step, gamma=args.decay_rate, verbose=True)
-        elif args.scheduler == 'slanted':
-            self.scheduler = get_slanted_triangular_scheduler(
-                self.optimizer, num_epochs=self.num_epochs)
-        elif args.scheduler == 'linear':
-            self.scheduler = get_linear_scheduler(
-                self.optimizer, num_training_epochs=self.num_epochs, initial_lr=args.lr, final_lr=args.lr/32)
-        elif args.scheduler == 'const':
-            self.scheduler = lr_scheduler.StepLR(
-                self.optimizer, step_size=self.num_epochs, gamma=1., verbose=True)
-        else:
-            raise ValueError(
-                'Scheduler {} not implemented.'.format(args.scheduler))
-        print('Using {} scheduler.'.format(args.scheduler))
-
-        modelname = 'allenai/scibert_scivocab_uncased' if args.lm == 'scibert' else 'bert-base-uncased'
-        self.collate_fn = CollateFn(modelname=modelname)
+    def load_optimizer(self):
+        self.optimizer = AdamW(self.model.parameters(), 
+                               lr=self.args.lr, weight_decay=self.args.l2)
+    
+    def load_datasets(self, train_dataset, val_dataset, test_dataset):
+        modelname = 'allenai/scibert_scivocab_uncased' if self.args.lm == 'scibert' else 'bert-base-uncased'
+        self.collate_fn = CollateFn(modelname=modelname, instance_weights=True)
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
         self.val_dataloader = DataLoader(
@@ -57,11 +52,29 @@ class Trainer(object):
         self.test_dataloader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
 
+    def load_logger(self):
         self.logger = SummaryWriter(
             os.path.join(self.workspace, 'log'))
-
         self.best_epoch = 0
         self.best_metric = 0.
+
+    def load_scheduler(self):
+        if self.args.scheduler == 'exp':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=self.args.decay_step, gamma=self.args.decay_rate, verbose=True)
+        elif self.args.scheduler == 'slanted':
+            self.scheduler = get_slanted_triangular_scheduler(
+                self.optimizer, num_epochs=self.num_epochs)
+        elif self.args.scheduler == 'linear':
+            self.scheduler = get_linear_scheduler(
+                self.optimizer, num_training_epochs=self.num_epochs, initial_lr=self.args.lr, final_lr=self.args.lr/32)
+        elif self.args.scheduler == 'const':
+            self.scheduler = lr_scheduler.StepLR(
+                self.optimizer, step_size=self.num_epochs, gamma=1., verbose=True)
+        else:
+            raise ValueError(
+                'Scheduler {} not implemented.'.format(self.args.scheduler))
+        print('Using {} scheduler.'.format(self.args.scheduler))
 
     def update_train_dataset(self, train_dataset):
         self.train_dataloader = DataLoader(
@@ -210,3 +223,72 @@ class Trainer(object):
                 epoch, train_time, eval_time, loss, metric))
         else:
             raise TypeError('Type metric {} is wrong.'.format(type(metric)))
+
+class MultiHeadTrainer(Trainer):
+    def load_datasets(self, train_datasets, val_dataset, test_dataset):
+        class_definitions = train_datasets.class_definitions
+        modelname = 'allenai/scibert_scivocab_uncased' if self.args.lm == 'scibert' else 'bert-base-uncased'
+        self.collate_fn = CollateFn(modelname=modelname, class_definitions=class_definitions, instance_weights=False)
+        self.train_dataloader = DataLoader(
+            train_datasets, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
+        self.val_dataloader = DataLoader(
+            val_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
+        self.test_dataloader = DataLoader(
+            test_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
+        
+    def load_losses(self):
+        num_losses = len(torch.unique(self.collate_fn.class_head_indices))
+        self.loss_fns = [nn.CrossEntropyLoss() for _ in range(num_losses)]
+
+    def compute_loss(self, labels, logits, ds_indices):
+        losses = []
+        for ds_idx in logits.keys():
+            if len(logits[ds_idx]) > 0:
+                losses.append(self.loss_fns[ds_idx](logits[ds_idx], labels[ds_indices == ds_idx]))
+        loss = sum(losses)
+        return loss
+    
+    def train_one_epoch(self):
+        total_loss = 0.
+        self.model.train()
+
+        for batched_text, labels, ds_indices, class_tokens, class_ds_indices in self.train_dataloader:
+            labels = labels.to(self.device)
+            ds_indices = ds_indices.to(self.device)
+            class_ds_indices = class_ds_indices.to(self.device)
+
+            preds = self.model(batched_text, ds_indices, class_tokens, class_ds_indices)
+            loss = self.compute_loss(labels, preds, ds_indices)
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            total_loss += loss.item()
+
+        return total_loss / len(self.train_dataloader)
+
+    def eval_one_epoch(self, return_preds=False, test=False, outside_dataloader=None):
+        self.model.eval()
+
+        if outside_dataloader is not None:
+            data_loader = outside_dataloader
+        else:
+            if test:
+                data_loader = self.test_dataloader
+            else:
+                data_loader = self.val_dataloader  # for validation
+
+        preds, labels = list(), list()
+        with torch.no_grad():
+            for batched_text, label, ds_indices, class_tokens, class_ds_indices in data_loader:
+                preds.append(self.model(
+                    batched_text, ds_indices, class_tokens, class_ds_indices
+                )[0])
+                labels.append(label)
+            preds = torch.cat(preds, dim=0).cpu().numpy()
+            labels = torch.cat(labels, dim=0).numpy()
+            metric = self.compute_metrics(labels, preds)
+
+            if return_preds:
+                return metric, preds
+            return metric

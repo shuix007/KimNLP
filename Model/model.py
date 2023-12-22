@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 
-from transformers import AutoModel
+from transformers import AutoModel, AutoTokenizer
 from .layers import DenseLayer
 
 def mask_pooling(model_output, attention_mask):
@@ -136,6 +136,67 @@ class MultiHeadPsuedoLanguageModel(nn.Module):
             print(', '.join(label_maps[i]))
             for j in range(len(label_space_projection)):
                 print(', '.join([str(x) for x in label_space_projection[j]] + [label_maps[0][j]]))
+
+    def save_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        torch.save(self.state_dict(), model_filename)
+
+    def load_pretrained(self, modeldir):
+        model_filename = os.path.join(modeldir, 'checkpoint.pt')
+        self.load_state_dict(torch.load(model_filename))
+
+class MultiHeadContrastiveLanguageModel(nn.Module):
+    def __init__(self, 
+                 modelname: str, 
+                 device: str, 
+                 readout: str
+        ):
+        super(MultiHeadContrastiveLanguageModel, self).__init__()
+        self.device = device
+        self.modelname = modelname
+        self.readout_fn = readout
+
+        self.tokenizer = AutoTokenizer.from_pretrained(modelname)
+        self.model = AutoModel.from_pretrained(modelname)
+        self.hidden_size = self.model.config.hidden_size
+
+    def readout(self, model_inputs, model_outputs, readout_masks=None):
+        if self.readout_fn == 'cls':
+            text_representations = model_outputs.last_hidden_state[:, 0]
+        elif self.readout_fn == 'mean':
+            text_representations = mask_pooling(model_outputs, model_inputs['attention_mask'])
+        elif self.readout_fn == 'ch' and readout_masks is not None:
+            text_representations = mask_pooling(model_outputs, readout_masks)
+        else:
+            raise ValueError('Invalid readout function.')
+        return text_representations
+
+    def _lm_forward(self, tokens):
+        tokens = tokens.to(self.device)
+        if 'readout_mask' in tokens:
+            readout_mask = tokens.pop('readout_mask')
+        else:
+            readout_mask = None
+        outputs = self.model(**tokens)
+        return self.readout(tokens, outputs, readout_mask)
+
+    def forward(self, input_tokens, input_head_indices, class_tokens, class_head_indices):
+        head_indices = torch.unique(class_head_indices)
+
+        input_text_representations = self._lm_forward(input_tokens)
+        class_text_representations = self._lm_forward(class_tokens)
+
+        final_preds = {}
+        for i in head_indices:
+            if torch.any(input_head_indices == i):
+                final_preds[i.item()] = torch.matmul(
+                                            input_text_representations[input_head_indices == i], 
+                                            class_text_representations[class_head_indices == i].transpose(0, 1)
+                                        )
+            else:
+                final_preds[i.item()] = torch.tensor([]).to(self.device)
+
+        return final_preds
 
     def save_pretrained(self, modeldir):
         model_filename = os.path.join(modeldir, 'checkpoint.pt')

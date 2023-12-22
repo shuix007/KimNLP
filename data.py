@@ -1,5 +1,6 @@
 import os
 import json
+import copy
 import torch
 import scipy
 import numpy as np
@@ -9,10 +10,26 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 class CollateFn(object):
-    def __init__(self, modelname):
+    def __init__(self, modelname, class_definitions=None, instance_weights=False):
+        self.instance_weights = instance_weights
         self.tokenizer = AutoTokenizer.from_pretrained(modelname)
         self.cited_here_tokens = self.tokenizer('<CITED HERE>', return_tensors='pt')[
             'input_ids'].squeeze()[1:-1]
+
+        if class_definitions is not None:
+            self.class_definitions = []
+            self.class_head_indices = []
+            for i, defs in enumerate(class_definitions):
+                self.class_definitions += defs
+                self.class_head_indices.append(i * torch.ones(len(defs), dtype=torch.long))
+            self.class_head_indices = torch.cat(self.class_head_indices, dim=0)
+            self.class_tokens = self.tokenizer(
+                self.class_definitions,
+                return_tensors="pt",
+                max_length=512,
+                truncation=True,
+                padding=True
+            )
 
     def _get_readout_mask(self, tokens):
         # cited_here_tokens = torch.tensor([962, 8412, 1530, 1374])
@@ -42,16 +59,23 @@ class CollateFn(object):
         return tokens
 
     def __call__(self, samples):
-        text, labels, ds_indices, instance_weights = list(map(list, zip(*samples)))
-        batched_text = self._tokenize_context(text)
-        labels = torch.stack(labels)
-        ds_indices = torch.stack(ds_indices)
-        instance_weights = torch.stack(instance_weights)
-        return batched_text, labels, ds_indices, instance_weights
+        if self.instance_weights:
+            text, labels, ds_indices, instance_weights = list(map(list, zip(*samples)))
+            batched_text = self._tokenize_context(text)
+            labels = torch.stack(labels)
+            ds_indices = torch.stack(ds_indices)
+            instance_weights = torch.stack(instance_weights)
+            return batched_text, labels, ds_indices, instance_weights
+        else:
+            text, labels, ds_indices = list(map(list, zip(*samples)))
+            batched_text = self._tokenize_context(text)
+            labels = torch.stack(labels)
+            ds_indices = torch.stack(ds_indices)
+            return batched_text, labels, ds_indices, copy.deepcopy(self.class_tokens), self.class_head_indices
 
-class Dataset(object):
-    def __init__(self, dataframe, id2label=None):
-        self.id2label = id2label
+class PLDataset(object):
+    def __init__(self, dataframe, class_definitions):
+        self.class_definitions = class_definitions
         self._load_data(dataframe)
 
     def __len__(self):
@@ -97,15 +121,31 @@ class Dataset(object):
         self.instance_weights = torch.ones_like(self.original_labels).float()
         self.text = annotated_data['context'].tolist()
 
+class Dataset(object):
+    def __init__(self, dataframe, class_definitions):
+        self.class_definitions = class_definitions
+        self._load_data(dataframe)
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        '''Get datapoint with index'''
+        return (self.text[idx], self.labels[idx], self.ds_index[idx])
+
+    def _load_data(self, annotated_data):
+        self.labels = torch.LongTensor(annotated_data['label'].tolist())
+        self.original_labels = torch.LongTensor(annotated_data['label'].tolist())
+        self.ds_index = torch.zeros_like(self.original_labels)
+        self.text = annotated_data['context'].tolist()
+
 class Datasets(object):
     def __init__(self, datasets):
         self.text = []
-        # self.ds_index = []
         self.labels = []
         self.instance_weights = []
         for i, d in enumerate(datasets):
             self.text += d.text
-            # self.ds_index.append(torch.full(len(d.text), i, dtype=torch.long))
             self.labels.append(d.labels)
             self.instance_weights.append(d.instance_weights)
         self.labels = torch.cat(self.labels, dim=0)
@@ -119,7 +159,38 @@ class Datasets(object):
         '''Get datapoint with index'''
         return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
 
-def create_data_channels(filename, split=None):
+class MultiHeadDatasets(object):
+    def __init__(self, datasets):
+        self.text = []
+        self.ds_index = []
+        self.labels = []
+        self.class_definitions = []
+        for i, d in enumerate(datasets):
+            self.text += d.text
+            self.ds_index.append(i * torch.ones(len(d.text), dtype=torch.long))
+            self.labels.append(d.labels)
+            self.class_definitions.append(d.class_definitions)
+        self.labels = torch.cat(self.labels, dim=0)
+        self.ds_index = torch.cat(self.ds_index, dim=0)
+    
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, idx):
+        '''Get datapoint with index'''
+        return (self.text[idx], self.labels[idx], self.ds_index[idx])
+
+def load_class_definitions(filename):
+    with open(filename, 'r') as f:
+        class_definitions = json.load(f)
+    
+    results = {k:{} for k in class_definitions.keys()}
+    for k, v in class_definitions.items():
+        for kk, vv in v.items():
+            results[k][kk.lower()] = vv
+    return results
+
+def create_data_channels(filename, class_definition_filename, split=None):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -136,13 +207,17 @@ def create_data_channels(filename, split=None):
     data_val = data[data['split'] == 'val'].reset_index()
     data_test = data[data['split'] == 'test'].reset_index()
 
-    train_data = Dataset(data_train)
-    val_data = Dataset(data_val)
-    test_data = Dataset(data_test)
+    class_definitions = load_class_definitions(class_definition_filename)
+    dataname = filename.split('/')[-1].split('.')[0]
+    data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
+
+    train_data = Dataset(data_train, data_class_definitions)
+    val_data = Dataset(data_val, data_class_definitions)
+    test_data = Dataset(data_test, data_class_definitions)
 
     return train_data, val_data, test_data, unique_labels
 
-def create_single_data_object(filename, split=None):
+def create_single_data_object(filename, class_definition_filename, split=None):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -155,7 +230,12 @@ def create_single_data_object(filename, split=None):
     data['label'] = data['label'].apply(
         lambda x: label2id[x])
 
+    class_definitions = load_class_definitions(class_definition_filename)
+    dataname = filename.split('/')[-1].split('.')[0]
+    print(class_definitions)
+    data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
+
     if split is None:
-        return Dataset(data), unique_labels
+        return Dataset(data, data_class_definitions), unique_labels
     else:
-        return Dataset(data[data['split'] == split].reset_index()), unique_labels
+        return Dataset(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
