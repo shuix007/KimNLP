@@ -232,7 +232,6 @@ def create_single_data_object(filename, class_definition_filename, split=None):
 
     class_definitions = load_class_definitions(class_definition_filename)
     dataname = filename.split('/')[-1].split('.')[0]
-    print(class_definitions)
     data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
 
     if split is None:
