@@ -5,7 +5,7 @@ os.environ['TRANSFORMERS_CACHE'] = '/mnt/nvme1n1/zeren/HuggingfaceCache/'
 from utils import save_args
 from trainer import Trainer, MultiHeadTrainer
 from data import create_data_channels, create_single_data_object, Datasets, MultiHeadDatasets
-from Model import LanguageModel, MultiHeadPsuedoLanguageModel, MultiHeadContrastiveLanguageModel
+from Model import LanguageModel, MultiHeadPsuedoLanguageModel, MultiHeadContrastiveLanguageModel, MultiHeadLanguageModel
 import numpy as np
 import random
 import torch
@@ -156,6 +156,60 @@ def main_cl(args):
         finetuner.load_model()
         preds = finetuner.test()
 
+def main_mtl(args):
+    datasets = args.dataset.split('-')
+    data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
+
+    if args.lm == 'scibert':
+        modelname = 'allenai/scibert_scivocab_uncased'
+    elif args.lm == 'bert':
+        modelname = 'bert-base-uncased'
+    else:
+        modelname = args.lm
+
+    train_data, val_data, test_data, model_label_map = create_data_channels(
+        data_filenames[0],
+        args.class_definition
+    )
+    train_datasets_list = [train_data]
+    if len(data_filenames) > 1:
+        for data_filename in data_filenames[1:]:
+            aux_data, aux_label_map = create_single_data_object(
+                data_filename, args.class_definition, split='train'
+            )
+            train_datasets_list.append(aux_data)
+    train_datasets = MultiHeadDatasets(train_datasets_list)
+
+    model = MultiHeadLanguageModel(
+        modelname=modelname,
+        device=args.device,
+        readout=args.readout,
+        num_classes=[N_CLASSES[ds] for ds in datasets]
+    ).to(args.device)
+
+    if not args.inference_only:
+        finetuner = MultiHeadTrainer(
+            model,
+            train_datasets,
+            val_data,
+            test_data,
+            args
+        )
+        print('Finetuning LM + MLP.')
+        finetuner.train()
+        finetuner.load_model()
+        preds = finetuner.test()
+    else:
+        finetuner = MultiHeadTrainer(
+            model,
+            train_datasets,
+            val_data,
+            test_data,
+            args
+        )
+        finetuner.load_model()
+        preds = finetuner.test()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data configuration
@@ -201,4 +255,5 @@ if __name__ == '__main__':
     save_args(args, args.workspace)
 
     # main_pl(args)
-    main_cl(args)
+    # main_cl(args)
+    main_mtl(args)
