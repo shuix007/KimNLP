@@ -267,11 +267,14 @@ class MultiHeadTrainer(Trainer):
 
         return total_loss / len(self.train_dataloader)
 
-    def eval_one_epoch(self, return_preds=False, test=False, outside_dataloader=None):
+    def eval_one_epoch(self, return_preds=False, return_labels=False, test=False, outside_dataset=None):
         self.model.eval()
 
-        if outside_dataloader is not None:
-            data_loader = outside_dataloader
+        if outside_dataset is not None:
+            data_loader = DataLoader(
+                outside_dataset, batch_size=self.batch_size, 
+                shuffle=False, collate_fn=self.collate_fn
+            )
         else:
             if test:
                 data_loader = self.test_dataloader
@@ -290,5 +293,7 @@ class MultiHeadTrainer(Trainer):
             metric = self.compute_metrics(labels, preds)
 
             if return_preds:
+                if return_labels:
+                    return metric, preds, labels
                 return metric, preds
             return metric
