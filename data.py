@@ -6,6 +6,7 @@ import scipy
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from scipy.special import softmax
 
 from transformers import AutoTokenizer
 
@@ -73,17 +74,80 @@ class CollateFn(object):
             ds_indices = torch.stack(ds_indices)
             return batched_text, labels, ds_indices, copy.deepcopy(self.class_tokens), self.class_head_indices
 
+# class PLDataset(object):
+#     def __init__(self, dataframe, class_definitions):
+#         self.class_definitions = class_definitions
+#         self._load_data(dataframe)
+
+#     def __len__(self):
+#         return len(self.labels)
+
+#     def __getitem__(self, idx):
+#         '''Get datapoint with index'''
+#         return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
+
+#     def compute_confusion_matrix(self, preds):
+#         this_label_space = len(np.unique(self.original_labels.numpy()))
+#         model_label_space = preds.shape[1]
+#         confusion_matrix = np.zeros((this_label_space, model_label_space), dtype=np.int64)
+
+#         pred_label_idx = preds.argmax(axis=1)
+#         for i in range(len(self.original_labels)):
+#             confusion_matrix[self.original_labels[i], pred_label_idx[i]] += 1
+#         return confusion_matrix
+
+#     def visualize_confusion_matrix(self, preds, this_label_map, model_label_map):
+#         confusion_matrix = self.compute_confusion_matrix(preds)
+
+#         df = pd.DataFrame(confusion_matrix, index=this_label_map, columns=model_label_map)
+#         print(df)
+
+#     def pseudo_label(self, preds):
+#         pred_label_idx = preds.argmax(axis=1)
+#         self.labels = torch.LongTensor(pred_label_idx)
+
+#     def update_label_with_selection(self, preds):
+#         confusion_matrix = self.compute_confusion_matrix(preds)
+#         confusion_matrix = confusion_matrix / confusion_matrix.sum(axis=1, keepdims=True)
+
+#         pred_label_idx = preds.argmax(axis=1)
+#         self.labels = torch.LongTensor(pred_label_idx)
+#         for i in range(len(pred_label_idx)):
+#             self.instance_weights[i] = confusion_matrix[self.original_labels[i], pred_label_idx[i]]
+
+#     def _load_data(self, annotated_data):
+#         self.labels = torch.LongTensor(annotated_data['label'].tolist())
+#         self.original_labels = torch.LongTensor(annotated_data['label'].tolist())
+#         self.ds_index = torch.zeros_like(self.original_labels)
+#         self.instance_weights = torch.ones_like(self.original_labels).float()
+#         self.text = annotated_data['context'].tolist()
+        
 class PLDataset(object):
-    def __init__(self, dataframe, class_definitions):
+    # def __init__(self, dataframe, class_definitions):
+    #     self.class_definitions = class_definitions
+    #     self._load_data(dataframe)
+
+    def __init__(self, text, labels, original_labels, ds_index, class_definitions):
         self.class_definitions = class_definitions
-        self._load_data(dataframe)
+        self.labels = labels
+        self.original_labels = original_labels
+        self.ds_index = ds_index
+        self.text = text
+
+    @classmethod
+    def from_dataframe(cls, dataframe, class_definitions):
+        labels = torch.LongTensor(dataframe['label'].tolist())
+        original_labels = torch.LongTensor(dataframe['label'].tolist())
+        ds_index = torch.zeros_like(original_labels)
+        text = dataframe['context'].tolist()
+        return cls(text, labels, original_labels, ds_index, class_definitions)
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
+        return (self.text[idx], self.labels[idx], self.ds_index[idx])
 
     def compute_confusion_matrix(self, preds):
         this_label_space = len(np.unique(self.original_labels.numpy()))
@@ -101,9 +165,20 @@ class PLDataset(object):
         df = pd.DataFrame(confusion_matrix, index=this_label_map, columns=model_label_map)
         print(df)
 
-    def pseudo_label(self, preds):
+    def pseudo_label(self, preds, threshold=0.7):
         pred_label_idx = preds.argmax(axis=1)
-        self.labels = torch.LongTensor(pred_label_idx)
+        probs = softmax(preds, axis=1)
+        confident_prediction_idx = np.where(probs.max(axis=1) > threshold)[0]
+
+        if len(confident_prediction_idx) > 0:
+            labels = torch.LongTensor([pred_label_idx[idx] for idx in confident_prediction_idx])
+            original_labels = torch.LongTensor([self.original_labels[idx] for idx in confident_prediction_idx])
+            ds_index = torch.zeros_like(labels)
+            text = [self.text[idx] for idx in confident_prediction_idx]
+
+            return PLDataset(text, labels, original_labels, ds_index, self.class_definitions)
+        else:
+            return None
 
     def update_label_with_selection(self, preds):
         confusion_matrix = self.compute_confusion_matrix(preds)
@@ -118,7 +193,6 @@ class PLDataset(object):
         self.labels = torch.LongTensor(annotated_data['label'].tolist())
         self.original_labels = torch.LongTensor(annotated_data['label'].tolist())
         self.ds_index = torch.zeros_like(self.original_labels)
-        self.instance_weights = torch.ones_like(self.original_labels).float()
         self.text = annotated_data['context'].tolist()
 
 class Dataset(object):
@@ -143,13 +217,12 @@ class Datasets(object):
     def __init__(self, datasets):
         self.text = []
         self.labels = []
-        self.instance_weights = []
+        self.class_definitions = []
         for i, d in enumerate(datasets):
             self.text += d.text
             self.labels.append(d.labels)
-            self.instance_weights.append(d.instance_weights)
+            self.class_definitions.append(d.class_definitions)
         self.labels = torch.cat(self.labels, dim=0)
-        self.instance_weights = torch.cat(self.instance_weights, dim=0)
         self.ds_index = torch.zeros_like(self.labels) # torch.cat(self.ds_index, dim=0)
     
     def __len__(self):
@@ -157,7 +230,7 @@ class Datasets(object):
     
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        return (self.text[idx], self.labels[idx], self.ds_index[idx], self.instance_weights[idx])
+        return (self.text[idx], self.labels[idx], self.ds_index[idx])
 
 class MultiHeadDatasets(object):
     def __init__(self, datasets):
@@ -190,7 +263,7 @@ def load_class_definitions(filename):
             results[k][kk.lower()] = vv
     return results
 
-def create_data_channels(filename, class_definition_filename, split=None):
+def create_data_channels(filename, class_definition_filename, split=None, pl=False):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -211,13 +284,18 @@ def create_data_channels(filename, class_definition_filename, split=None):
     dataname = filename.split('/')[-1].split('.')[0]
     data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
 
-    train_data = Dataset(data_train, data_class_definitions)
-    val_data = Dataset(data_val, data_class_definitions)
-    test_data = Dataset(data_test, data_class_definitions)
+    if pl:
+        train_data = PLDataset.from_dataframe(data_train, data_class_definitions)
+        val_data = PLDataset.from_dataframe(data_val, data_class_definitions)
+        test_data = PLDataset.from_dataframe(data_test, data_class_definitions)
+    else:
+        train_data = Dataset(data_train, data_class_definitions)
+        val_data = Dataset(data_val, data_class_definitions)
+        test_data = Dataset(data_test, data_class_definitions)
 
     return train_data, val_data, test_data, unique_labels
 
-def create_single_data_object(filename, class_definition_filename, split=None):
+def create_single_data_object(filename, class_definition_filename, split=None, pl=False):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -234,7 +312,13 @@ def create_single_data_object(filename, class_definition_filename, split=None):
     dataname = filename.split('/')[-1].split('.')[0]
     data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
 
-    if split is None:
-        return Dataset(data, data_class_definitions), unique_labels
+    if pl:
+        if split is None:
+            return PLDataset.from_dataframe(data, data_class_definitions), unique_labels
+        else:
+            return PLDataset.from_dataframe(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
     else:
-        return Dataset(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
+        if split is None:
+            return Dataset(data, data_class_definitions), unique_labels
+        else:
+            return Dataset(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
