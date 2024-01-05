@@ -31,22 +31,23 @@ def main_pl(args):
 
     train_data, val_data, test_data, model_label_map = create_data_channels(
         data_filenames[0],
-        args.class_definition
+        args.class_definition,
+        pl=True
     )
     if len(data_filenames) > 1:
         aux_data, aux_label_map = create_single_data_object(
-            data_filenames[1], args.class_definition, split='train'
+            data_filenames[1], args.class_definition, split='train', pl=True
         )
 
-    model = MultiHeadPsuedoLanguageModel(
+    model = MultiHeadLanguageModel(
         modelname=modelname,
         device=args.device,
         readout=args.readout,
-        num_classes=[N_CLASSES[datasets[0]]] # [N_CLASSES[ds] for ds in datasets]
+        num_classes=[N_CLASSES[datasets[0]]]
     ).to(args.device)
 
     if not args.inference_only:
-        finetuner = Trainer(
+        finetuner = MultiHeadTrainer(
             model,
             train_data,
             val_data,
@@ -58,7 +59,7 @@ def main_pl(args):
         finetuner.load_model()
         preds = finetuner.test()
     else:
-        finetuner = Trainer(
+        finetuner = MultiHeadTrainer(
             model,
             train_data,
             val_data,
@@ -76,21 +77,22 @@ def main_pl(args):
 
         print('Pseudo-labeling the auxiliary dataset.')
         if args.pl == 'pl':
-            aux_data.pseudo_label(aux_preds)
+            psuedo_labeled_dataset = aux_data.pseudo_label(aux_preds, threshold=0.9)
+            print('Number of psuedo-labeled data: {}/{}'.format(len(psuedo_labeled_dataset), len(aux_data)))
         elif args.pl == 'pls':
             aux_data.update_label_with_selection(aux_preds)
         else:
             raise NotImplementedError
-        train_datasets = Datasets([train_data, aux_data])
+        train_datasets = Datasets([train_data, psuedo_labeled_dataset])
 
-        model = MultiHeadPsuedoLanguageModel(
+        model = MultiHeadLanguageModel(
             modelname=modelname,
             device=args.device,
             readout=args.readout,
             num_classes=[N_CLASSES[datasets[0]]] # [N_CLASSES[ds] for ds in datasets]
         ).to(args.device)
 
-        finetuner = Trainer(
+        finetuner = MultiHeadTrainer(
             model,
             train_datasets,
             val_data,
@@ -214,8 +216,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data configuration
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--data_dir', required=True)
-    parser.add_argument('--workspace', required=True)
+    parser.add_argument('--data_dir', default='Data/', type=str)
+    parser.add_argument('--workspace', default='Workspaces/Test', type=str)
     parser.add_argument('--class_definition', default='Data/class_def.json', type=str)
 
     # training configuration
@@ -235,7 +237,7 @@ if __name__ == '__main__':
 
     # model configuration
     parser.add_argument('--lm', default='scibert', type=str)
-    parser.add_argument('--pl', default='pls', type=str)
+    parser.add_argument('--pl', default='pl', type=str)
     parser.add_argument('--max_length', default=512, type=int)
     parser.add_argument('--readout', default='cls', type=str)
 
@@ -255,5 +257,5 @@ if __name__ == '__main__':
     save_args(args, args.workspace)
 
     # main_pl(args)
-    # main_cl(args)
-    main_mtl(args)
+    main_cl(args)
+    # main_mtl(args)
