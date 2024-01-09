@@ -20,7 +20,7 @@ do
     case "${flag}" in
         s) seed=${OPTARG};;
         d) data=${OPTARG};;
-        p) lmbdas=${OPTARG};;
+        p) readout=${OPTARG};;
     esac
 done
 
@@ -32,18 +32,18 @@ CURRENTEPOCTIME=`date +"%Y-%m-%d-%H-%M-%S"`
 # Run the PyTorch training script
 python main.py \
     --dataset=${data} \
-    --lambdas=${lmbdas} \
+    --lambdas=1 \
     --data_dir=Data \
     --lm=scibert \
-    --readout=ch \
-    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert \
-    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert-log.txt
+    --readout=${readout} \
+    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${readout}-scibert \
+    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${readout}-scibert-log.txt
 
 python main.py \
     --dataset=${data} \
-    --lambdas=${lmbdas} \
+    --lambdas=1 \
     --data_dir=Data \
     --lm=bert \
-    --readout=ch \
-    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert \
-    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert-log.txt
+    --readout=${readout} \
+    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert \
+    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert-log.txt
