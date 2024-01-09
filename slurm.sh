@@ -32,7 +32,7 @@ CURRENTEPOCTIME=`date +"%Y-%m-%d-%H-%M-%S"`
 # Run the PyTorch training script
 python main.py \
     --dataset=${data} \
-    --lmbdas=${lmbdas} \
+    --lambdas=${lmbdas} \
     --data_dir=Data \
     --lm=scibert \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert \
@@ -40,7 +40,7 @@ python main.py \
 
 python main.py \
     --dataset=${data} \
-    --lmbdas=${lmbdas} \
+    --lambdas=${lmbdas} \
     --data_dir=Data \
     --lm=bert \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert \

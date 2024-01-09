@@ -17,13 +17,13 @@ done
 done
 
 for seed in ${seed_list[@]}; do
-for data in ${double_data_list[@]}; do
+for data in ${triple_data_list[@]}; do
 for lmbdas1 in ${lambda_list[@]}; do
 for lmbdas2 in ${lambda_list[@]}; do
     sbatch slurm.sh \
         -d ${data} \
         -s ${seed} \
-        -p ${lmbdas1}-${lmbdas2}
+        -p "1"-${lmbdas1}-${lmbdas2}
 done
 done
 done
