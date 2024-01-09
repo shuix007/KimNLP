@@ -229,6 +229,10 @@ class MultiHeadTrainer(Trainer):
         class_definitions = train_datasets.class_definitions
         modelname = 'allenai/scibert_scivocab_uncased' if self.args.lm == 'scibert' else 'bert-base-uncased'
         self.collate_fn = CollateFn(modelname=modelname, class_definitions=class_definitions, instance_weights=False)
+
+        self.lambdas = train_datasets.lambdas
+        self.lambdas[0] = 1.
+
         self.train_dataloader = DataLoader(
             train_datasets, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
         self.val_dataloader = DataLoader(
@@ -244,7 +248,9 @@ class MultiHeadTrainer(Trainer):
         losses = []
         for ds_idx in logits.keys():
             if len(logits[ds_idx]) > 0:
-                losses.append(self.loss_fns[ds_idx](logits[ds_idx], labels[ds_indices == ds_idx]))
+                losses.append(
+                    self.lambdas[ds_idx] * self.loss_fns[ds_idx](logits[ds_idx], labels[ds_indices == ds_idx])
+                )
         loss = sum(losses)
         return loss
     

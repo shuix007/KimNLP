@@ -160,6 +160,13 @@ def main_cl(args):
 
 def main_mtl(args):
     datasets = args.dataset.split('-')
+    lambdas = [float(l) for l in args.lambdas.split('-')]
+
+    if lambdas[0] != 1:
+        lambdas[0] = 1.
+        print('The first lambda is set to 1.')
+    assert len(datasets) == len(lambdas), "The size of lambdas should be the same as the number of datasets."
+
     data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
 
     if args.lm == 'scibert':
@@ -171,13 +178,14 @@ def main_mtl(args):
 
     train_data, val_data, test_data, model_label_map = create_data_channels(
         data_filenames[0],
-        args.class_definition
+        args.class_definition,
+        lmbd=lambdas[0]
     )
     train_datasets_list = [train_data]
     if len(data_filenames) > 1:
-        for data_filename in data_filenames[1:]:
+        for i, data_filename in enumerate(data_filenames[1:]):
             aux_data, aux_label_map = create_single_data_object(
-                data_filename, args.class_definition, split='train'
+                data_filename, args.class_definition, split='train', lmbd=lambdas[i+1]
             )
             train_datasets_list.append(aux_data)
     train_datasets = MultiHeadDatasets(train_datasets_list)
@@ -211,11 +219,13 @@ def main_mtl(args):
         )
         finetuner.load_model()
         preds = finetuner.test()
+    print('Lambdas: {}'.format(lambdas))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data configuration
     parser.add_argument('--dataset', required=True)
+    parser.add_argument('--lambdas', required=True)
     parser.add_argument('--data_dir', default='Data/', type=str)
     parser.add_argument('--workspace', default='Workspaces/Test', type=str)
     parser.add_argument('--class_definition', default='Data/class_def.json', type=str)
@@ -257,5 +267,5 @@ if __name__ == '__main__':
     save_args(args, args.workspace)
 
     # main_pl(args)
-    main_cl(args)
-    # main_mtl(args)
+    # main_cl(args)
+    main_mtl(args)

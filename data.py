@@ -127,20 +127,21 @@ class PLDataset(object):
     #     self.class_definitions = class_definitions
     #     self._load_data(dataframe)
 
-    def __init__(self, text, labels, original_labels, ds_index, class_definitions):
+    def __init__(self, text, labels, original_labels, ds_index, class_definitions, lmbd=1.0):
         self.class_definitions = class_definitions
         self.labels = labels
         self.original_labels = original_labels
         self.ds_index = ds_index
         self.text = text
+        self.lmbd = lmbd
 
     @classmethod
-    def from_dataframe(cls, dataframe, class_definitions):
+    def from_dataframe(cls, dataframe, class_definitions, lmbd=1.0):
         labels = torch.LongTensor(dataframe['label'].tolist())
         original_labels = torch.LongTensor(dataframe['label'].tolist())
         ds_index = torch.zeros_like(original_labels)
         text = dataframe['context'].tolist()
-        return cls(text, labels, original_labels, ds_index, class_definitions)
+        return cls(text, labels, original_labels, ds_index, class_definitions, lmbd=lmbd)
 
     def __len__(self):
         return len(self.labels)
@@ -196,8 +197,9 @@ class PLDataset(object):
         self.text = annotated_data['context'].tolist()
 
 class Dataset(object):
-    def __init__(self, dataframe, class_definitions):
+    def __init__(self, dataframe, class_definitions, lmbd=1.0):
         self.class_definitions = class_definitions
+        self.lmbd = lmbd
         self._load_data(dataframe)
 
     def __len__(self):
@@ -218,10 +220,12 @@ class Datasets(object):
         self.text = []
         self.labels = []
         self.class_definitions = []
+        self.lambdas = []
         for i, d in enumerate(datasets):
             self.text += d.text
             self.labels.append(d.labels)
             self.class_definitions.append(d.class_definitions)
+            self.lambdas.append(d.lmbd)
         self.labels = torch.cat(self.labels, dim=0)
         self.ds_index = torch.zeros_like(self.labels) # torch.cat(self.ds_index, dim=0)
     
@@ -238,11 +242,13 @@ class MultiHeadDatasets(object):
         self.ds_index = []
         self.labels = []
         self.class_definitions = []
+        self.lambdas = []
         for i, d in enumerate(datasets):
             self.text += d.text
             self.ds_index.append(i * torch.ones(len(d.text), dtype=torch.long))
             self.labels.append(d.labels)
             self.class_definitions.append(d.class_definitions)
+            self.lambdas.append(d.lmbd)
         self.labels = torch.cat(self.labels, dim=0)
         self.ds_index = torch.cat(self.ds_index, dim=0)
     
@@ -263,7 +269,7 @@ def load_class_definitions(filename):
             results[k][kk.lower()] = vv
     return results
 
-def create_data_channels(filename, class_definition_filename, split=None, pl=False):
+def create_data_channels(filename, class_definition_filename, split=None, pl=False, lmbd=1.0):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -285,17 +291,17 @@ def create_data_channels(filename, class_definition_filename, split=None, pl=Fal
     data_class_definitions = [class_definitions[dataname][lb.lower()] for lb in unique_labels]
 
     if pl:
-        train_data = PLDataset.from_dataframe(data_train, data_class_definitions)
-        val_data = PLDataset.from_dataframe(data_val, data_class_definitions)
-        test_data = PLDataset.from_dataframe(data_test, data_class_definitions)
+        train_data = PLDataset.from_dataframe(data_train, data_class_definitions, lmbd=lmbd)
+        val_data = PLDataset.from_dataframe(data_val, data_class_definitions, lmbd=lmbd)
+        test_data = PLDataset.from_dataframe(data_test, data_class_definitions, lmbd=lmbd)
     else:
-        train_data = Dataset(data_train, data_class_definitions)
-        val_data = Dataset(data_val, data_class_definitions)
-        test_data = Dataset(data_test, data_class_definitions)
+        train_data = Dataset(data_train, data_class_definitions, lmbd=lmbd)
+        val_data = Dataset(data_val, data_class_definitions, lmbd=lmbd)
+        test_data = Dataset(data_test, data_class_definitions, lmbd=lmbd)
 
     return train_data, val_data, test_data, unique_labels
 
-def create_single_data_object(filename, class_definition_filename, split=None, pl=False):
+def create_single_data_object(filename, class_definition_filename, split=None, pl=False, lmbd=1.0):
     data = pd.read_csv(filename, sep='\t')
     data = data.fillna(' ')
 
@@ -314,11 +320,11 @@ def create_single_data_object(filename, class_definition_filename, split=None, p
 
     if pl:
         if split is None:
-            return PLDataset.from_dataframe(data, data_class_definitions), unique_labels
+            return PLDataset.from_dataframe(data, data_class_definitions, lmbd=lmbd), unique_labels
         else:
-            return PLDataset.from_dataframe(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
+            return PLDataset.from_dataframe(data[data['split'] == split].reset_index(), data_class_definitions, lmbd=lmbd), unique_labels
     else:
         if split is None:
-            return Dataset(data, data_class_definitions), unique_labels
+            return Dataset(data, data_class_definitions, lmbd=lmbd), unique_labels
         else:
-            return Dataset(data[data['split'] == split].reset_index(), data_class_definitions), unique_labels
+            return Dataset(data[data['split'] == split].reset_index(), data_class_definitions, lmbd=lmbd), unique_labels
