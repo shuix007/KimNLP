@@ -163,7 +163,8 @@ class MultiHeadContrastiveLanguageModel(nn.Module):
         elif self.readout_fn == 'ch' and readout_masks is not None:
             text_representations = mask_pooling(model_outputs, readout_masks)
         else:
-            raise ValueError('Invalid readout function.')
+            text_representations = model_outputs.last_hidden_state[:, 0]
+            # raise ValueError('Invalid readout function.')
         return text_representations
 
     def _lm_forward(self, tokens):
