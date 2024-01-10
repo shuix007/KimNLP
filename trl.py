@@ -7,6 +7,8 @@ from trainer import Trainer, MultiHeadTrainer
 from data import create_data_channels, create_single_data_object, Datasets, MultiHeadDatasets
 from Model import MultiHeadLanguageModel
 import numpy as np
+from scipy.stats import entropy
+from scipy.special import softmax
 import random
 import torch
 import argparse
@@ -17,123 +19,106 @@ N_CLASSES = {
     'scicite': 3
 }
 
-def trl(labels, preds):
-    pass
+def trl(labels, pred_logits):
+    N = len(labels)
+    preds = pred_logits.argmax(axis=1)
 
-def main(args):
-    # data_filename = os.path.join(args.data_dir, args.dataset+'.tsv')
-    datasets = args.dataset.split('-')
-    data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
+    label_base = len(np.unique(labels))
+    pred_base = pred_logits.shape[1]
+    confusion_matrix = np.zeros((label_base, pred_base))
+    for i in range(N):
+        # confusion_matrix[labels[i], preds[i]] += 1
+        confusion_matrix[labels[i]] += softmax(pred_logits[i])
+    # print(confusion_matrix)
 
-    if args.lm == 'scibert':
-        modelname = 'allenai/scibert_scivocab_uncased'
-    elif args.lm == 'bert':
-        modelname = 'bert-base-uncased'
-    else:
-        modelname = args.lm
+    base_entropy = entropy(confusion_matrix.sum(axis=1) / confusion_matrix.sum(), base=label_base)
+    pred_entropy = (entropy(confusion_matrix / confusion_matrix.sum(axis=0, keepdims=True), axis=0, base=label_base) * ((confusion_matrix.sum(axis=0) / confusion_matrix.sum()))).sum()
+    lambda_ = (base_entropy - pred_entropy) / base_entropy
+    print('Base entropy: {:.4f}, pred entropy: {:.4f}, lambda: {:.4f}'.format(base_entropy, pred_entropy, lambda_))
 
-    train_data, val_data, test_data, model_label_map = create_data_channels(
-        data_filenames[0],
-        args.class_definition
-    )
-    train_datasets_list = [train_data]
-    if len(data_filenames) > 1:
-        for data_filename in data_filenames[1:]:
-            aux_data, aux_label_map = create_single_data_object(
-                data_filename, args.class_definition, split='train'
+def list_workspaces(workspace_dir):
+    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-01')]
+
+    workspace_dict = {
+        'bert': {
+            'acl': [],
+            'kim': [],
+            'scicite': []
+        },
+        'scibert': {
+            'acl': [],
+            'kim': [],
+            'scicite': []
+        }
+    }
+
+    for w in workspaces:
+        splited_w = w.split('-')
+        d = splited_w[6]
+        m = splited_w[-1]
+
+        workspace_dict[m][d].append(w)
+    return workspace_dict
+
+def main_trl(args):
+    workspaces = list_workspaces(args.workspace_all)
+
+    for lm in ['bert', 'scibert']:
+        args.lm = lm
+        if lm == 'scibert':
+            modelname = 'allenai/scibert_scivocab_uncased'
+        elif lm == 'bert':
+            modelname = 'bert-base-uncased'
+
+        for ds in ['acl', 'kim', 'scicite']:
+            aux_datasets = ['acl', 'kim', 'scicite']
+            aux_datasets.remove(ds)
+            datasets = [ds] + aux_datasets
+            data_filenames = [os.path.join(args.data_dir, d+'.tsv') for d in datasets]
+
+            model = MultiHeadLanguageModel(
+                modelname=modelname,
+                device=args.device,
+                readout=args.readout,
+                num_classes=[N_CLASSES[d] for d in datasets[:1]]
+            ).to(args.device)
+
+            train_data, val_data, test_data, model_label_map = create_data_channels(
+                data_filenames[0],
+                args.class_definition,
+                lmbd=1.
             )
-            train_datasets_list.append(aux_data)
-    train_datasets = MultiHeadDatasets(train_datasets_list)
+            train_datasets_list = [train_data]
+            train_datasets = MultiHeadDatasets(train_datasets_list)
 
-    model = MultiHeadContrastiveLanguageModel(
-        modelname=modelname,
-        device=args.device,
-        readout=args.readout
-    ).to(args.device)
-
-    if not args.inference_only:
-        finetuner = MultiHeadTrainer(
-            model,
-            train_datasets,
-            val_data,
-            test_data,
-            args
-        )
-        print('Finetuning LM + MLP.')
-        finetuner.train()
-        finetuner.load_model()
-        preds = finetuner.test()
-    else:
-        finetuner = MultiHeadTrainer(
-            model,
-            train_datasets,
-            val_data,
-            test_data,
-            args
-        )
-        finetuner.load_model()
-        preds = finetuner.test()
-
-def main_mtl(args):
-    datasets = args.dataset.split('-')
-    data_filenames = [os.path.join(args.data_dir, ds+'.tsv') for ds in datasets]
-
-    if args.lm == 'scibert':
-        modelname = 'allenai/scibert_scivocab_uncased'
-    elif args.lm == 'bert':
-        modelname = 'bert-base-uncased'
-    else:
-        modelname = args.lm
-
-    train_data, val_data, test_data, model_label_map = create_data_channels(
-        data_filenames[0],
-        args.class_definition
-    )
-    train_datasets_list = [train_data]
-    if len(data_filenames) > 1:
-        for data_filename in data_filenames[1:]:
-            aux_data, aux_label_map = create_single_data_object(
-                data_filename, args.class_definition, split='train'
-            )
-            train_datasets_list.append(aux_data)
-    train_datasets = MultiHeadDatasets(train_datasets_list)
-
-    model = MultiHeadLanguageModel(
-        modelname=modelname,
-        device=args.device,
-        readout=args.readout,
-        num_classes=[N_CLASSES[ds] for ds in datasets]
-    ).to(args.device)
-
-    if not args.inference_only:
-        finetuner = MultiHeadTrainer(
-            model,
-            train_datasets,
-            val_data,
-            test_data,
-            args
-        )
-        print('Finetuning LM + MLP.')
-        finetuner.train()
-        finetuner.load_model()
-        preds = finetuner.test()
-    else:
-        finetuner = MultiHeadTrainer(
-            model,
-            train_datasets,
-            val_data,
-            test_data,
-            args
-        )
-        finetuner.load_model()
-        preds = finetuner.test()
+            for wkspc in workspaces[lm][ds]:
+                args.workspace = os.path.join(args.workspace_all, wkspc)
+                finetuner = MultiHeadTrainer(
+                    model,
+                    train_datasets,
+                    val_data,
+                    test_data,
+                    args
+                )
+                finetuner.load_model()
+                preds = finetuner.test()
+                
+                for i, data_filename in enumerate(data_filenames[1:]):
+                    aux_data, aux_label_map = create_single_data_object(
+                        data_filename, args.class_definition, split='train', lmbd=1.
+                    )
+                    aux_preds = finetuner.test(outside_dataset=aux_data)
+                    aux_labels = aux_data.original_labels.numpy()
+                    print(lm, ds, wkspc, data_filename)
+                    trl(aux_labels, aux_preds)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # data configuration
-    parser.add_argument('--dataset', required=True)
-    parser.add_argument('--data_dir', required=True)
-    parser.add_argument('--workspace', required=True)
+    parser.add_argument('--dataset', default='kim', type=str)
+    parser.add_argument('--data_dir', default='Data/', type=str)
+    parser.add_argument('--workspace', default='Workspaces', type=str)
+    parser.add_argument('--workspace_all', default='Workspaces', type=str)
     parser.add_argument('--class_definition', default='Data/class_def.json', type=str)
 
     # training configuration
@@ -172,6 +157,4 @@ if __name__ == '__main__':
         os.mkdir(args.workspace)
     save_args(args, args.workspace)
 
-    # main_pl(args)
-    # main_cl(args)
-    main_mtl(args)
+    main_trl(args)
