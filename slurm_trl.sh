@@ -34,28 +34,32 @@ elif [[ ${data} == "kim-scicite" ]]; then
     bertlmbdas="1-0.0934"
     scibertlmbdas="1-0.1274"
 elif [[ ${data} == "acl-scicite" ]]; then
-    bertlmbdas="1-0664"
+    bertlmbdas="1-0.0664"
     scibertlmbdas="1-0.0849"
 elif [[ ${data} == "acl-kim" ]]; then
     bertlmbdas="1-0.0871"
-    scibertlmbdas="1-0.089"
+    scibertlmbdas="1-0.0890"
 elif [[ ${data} == "scicite-kim" ]]; then
     bertlmbdas="1-0.1084"
     scibertlmbdas="1-0.1005"
 elif [[ ${data} == "scicite-acl" ]]; then
     bertlmbdas="1-0.2273"
-    scibertlmbdas="1-0.276"
+    scibertlmbdas="1-0.2760"
+else
+    echo "Warning: Unrecognized value of data: ${data}"
 fi
 
 if [[ ${data} == "acl-kim-scicite" ]]; then
     bertlmbdas="1-0.0871-0.0664"
-    scibertlmbdas="1-0.089-0.0849"
+    scibertlmbdas="1-0.0890-0.0849"
 elif [[ ${data} == "kim-acl-scicite" ]]; then
     bertlmbdas="1-0.1491-0.0934"
     scibertlmbdas="1-0.2059-0.1274"
 elif [[ ${data} == "scicite-acl-kim" ]]; then
     bertlmbdas="1-0.2273-0.1084"
-    scibertlmbdas="1-0.276-0.1005"
+    scibertlmbdas="1-0.2760-0.1005"
+else
+    echo "Warning: Unrecognized value of data: ${data}"
 fi
 
 CURRENTEPOCTIME=`date +"%Y-%m-%d-%H-%M-%S"`

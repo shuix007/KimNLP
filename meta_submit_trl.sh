@@ -7,15 +7,15 @@ declare -a triple_data_list=("acl-kim-scicite" "kim-acl-scicite" "scicite-acl-ki
 for seed in ${seed_list[@]}; do
 for data in ${double_data_list[@]}; do
     sbatch slurm.sh \
-        -d ${data} \
-        -s ${seed}
+        -s ${seed} \
+        -d ${data}
 done
 done
 
 for seed in ${seed_list[@]}; do
 for data in ${triple_data_list[@]}; do
     sbatch slurm.sh \
-        -d ${data} \
-        -s ${seed}
+        -s ${seed} \
+        -d ${data}
 done
 done
