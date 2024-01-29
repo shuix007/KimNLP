@@ -12,7 +12,7 @@
 
 #SBATCH --mem=40G
 
-#SBATCH --mail-type=ALL
+#SBATCH --mail-type=FAIL
 #SBATCH --mail-user=shuix007@umn.edu
 
 while getopts s:d:p: flag
