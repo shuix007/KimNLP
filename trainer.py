@@ -234,7 +234,7 @@ class MultiHeadTrainer(Trainer):
         self.lambdas[0] = 1.
 
         self.train_dataloader = DataLoader(
-            train_datasets, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
+            train_datasets, batch_size=self.batch_size, shuffle=True, drop_last=True, collate_fn=self.collate_fn)
         self.val_dataloader = DataLoader(
             val_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.collate_fn)
         self.test_dataloader = DataLoader(

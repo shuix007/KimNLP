@@ -189,6 +189,9 @@ def main_mtl(args):
             )
             train_datasets_list.append(aux_data)
     train_datasets = MultiHeadDatasets(train_datasets_list)
+    if train_datasets.adjusted_batch_size_factor > 1:
+        args.batch_size = int(args.batch_size * train_datasets.adjusted_batch_size_factor)
+        print('Adjusting the training batch size to {}.'.format(args.batch_size))
 
     model = MultiHeadLanguageModel(
         modelname=modelname,

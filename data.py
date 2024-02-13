@@ -236,6 +236,29 @@ class Datasets(object):
         '''Get datapoint with index'''
         return (self.text[idx], self.labels[idx], self.ds_index[idx])
 
+# class MultiHeadDatasets(object):
+#     def __init__(self, datasets):
+#         self.text = []
+#         self.ds_index = []
+#         self.labels = []
+#         self.class_definitions = []
+#         self.lambdas = []
+#         for i, d in enumerate(datasets):
+#             self.text += d.text
+#             self.ds_index.append(i * torch.ones(len(d.text), dtype=torch.long))
+#             self.labels.append(d.labels)
+#             self.class_definitions.append(d.class_definitions)
+#             self.lambdas.append(d.lmbd)
+#         self.labels = torch.cat(self.labels, dim=0)
+#         self.ds_index = torch.cat(self.ds_index, dim=0)
+    
+#     def __len__(self):
+#         return len(self.labels)
+    
+#     def __getitem__(self, idx):
+#         '''Get datapoint with index'''
+#         return (self.text[idx], self.labels[idx], self.ds_index[idx])
+
 class MultiHeadDatasets(object):
     def __init__(self, datasets):
         self.text = []
@@ -243,6 +266,20 @@ class MultiHeadDatasets(object):
         self.labels = []
         self.class_definitions = []
         self.lambdas = []
+
+        self.dataset_sizes = [len(d.labels) for d in datasets]
+        if len(self.dataset_sizes) > 1:
+            if self.dataset_sizes[0] >= sum(self.dataset_sizes[1:]):
+                self.sample_auxiliary = False
+                self.adjusted_batch_size_factor = sum(self.dataset_sizes) / self.dataset_sizes[0] # <= 2
+            else:
+                self.sample_auxiliary = True
+                self.sample_distribution = np.array([d.lmbd for d in datasets[1:]]) / sum([d.lmbd for d in datasets[1:]])
+                self.adjusted_batch_size_factor = 2
+        else:
+            self.sample_auxiliary = False
+            self.adjusted_batch_size_factor = 1
+
         for i, d in enumerate(datasets):
             self.text += d.text
             self.ds_index.append(i * torch.ones(len(d.text), dtype=torch.long))
@@ -252,12 +289,28 @@ class MultiHeadDatasets(object):
         self.labels = torch.cat(self.labels, dim=0)
         self.ds_index = torch.cat(self.ds_index, dim=0)
     
+    def sample_auxiliary_instace(self):
+        sampled_dataset_idx = np.random.choice(
+            np.arange(1, len(self.dataset_sizes)), 
+            p=self.sample_distribution
+        )
+        instance_idx = np.random.choice(
+            self.dataset_sizes[sampled_dataset_idx]
+        ) + sum(self.dataset_sizes[:sampled_dataset_idx])
+        return instance_idx
+
     def __len__(self):
+        if self.sample_auxiliary: # if the auxiliary dataset is larger than the main dataset
+            return self.dataset_sizes[0] * 2
         return len(self.labels)
     
     def __getitem__(self, idx):
         '''Get datapoint with index'''
-        return (self.text[idx], self.labels[idx], self.ds_index[idx])
+        if idx < self.dataset_sizes[0] or not self.sample_auxiliary:
+            return (self.text[idx], self.labels[idx], self.ds_index[idx])
+        else:
+            real_idx = self.sample_auxiliary_instace()
+            return (self.text[real_idx], self.labels[real_idx], self.ds_index[real_idx])
 
 def load_class_definitions(filename):
     with open(filename, 'r') as f:
