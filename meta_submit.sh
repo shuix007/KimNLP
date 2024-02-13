@@ -8,7 +8,7 @@ declare -a lambda_list=("0.2" "0.4" "0.6" "0.8" "1.0")
 for seed in ${seed_list[@]}; do
 for data in ${double_data_list[@]}; do
 for lmbdas in ${lambda_list[@]}; do
-    sbatch slurm.sh \
+    sbatch --exclude=aga[39-40] slurm.sh \
         -d ${data} \
         -s ${seed} \
         -p "1"-${lmbdas}
@@ -20,7 +20,7 @@ for seed in ${seed_list[@]}; do
 for data in ${triple_data_list[@]}; do
 for lmbdas1 in ${lambda_list[@]}; do
 for lmbdas2 in ${lambda_list[@]}; do
-    sbatch slurm.sh \
+    sbatch --exclude=aga[39-40] slurm.sh \
         -d ${data} \
         -s ${seed} \
         -p "1"-${lmbdas1}-${lmbdas2}
