@@ -37,7 +37,7 @@ def trl(labels, pred_logits):
     print('Base entropy: {:.4f}, pred entropy: {:.4f}, lambda: {:.4f}'.format(base_entropy, pred_entropy, lambda_))
 
 def list_workspaces(workspace_dir):
-    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-01')]
+    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-02')]
 
     workspace_dict = {
         'bert': {
