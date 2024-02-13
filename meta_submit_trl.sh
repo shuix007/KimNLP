@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-declare -a seed_list=("4" "5")
+declare -a seed_list=("1" "2" "3")
 declare -a double_data_list=("kim-acl" "kim-scicite" "acl-scicite" "acl-kim" "scicite-kim" "scicite-acl")
 declare -a triple_data_list=("acl-kim-scicite" "kim-acl-scicite" "scicite-acl-kim")
 

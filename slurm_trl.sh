@@ -27,37 +27,73 @@ conda activate KimNLP
 
 cd /home/karypisg/shuix007/KimNLP/KimNLP
 
+# if [[ ${data} == "kim-acl" ]]; then
+#     bertlmbdas="1-0.1491"
+#     scibertlmbdas="1-0.2059"
+# elif [[ ${data} == "kim-scicite" ]]; then
+#     bertlmbdas="1-0.0934"
+#     scibertlmbdas="1-0.1274"
+# elif [[ ${data} == "acl-scicite" ]]; then
+#     bertlmbdas="1-0.0664"
+#     scibertlmbdas="1-0.0849"
+# elif [[ ${data} == "acl-kim" ]]; then
+#     bertlmbdas="1-0.0871"
+#     scibertlmbdas="1-0.0890"
+# elif [[ ${data} == "scicite-kim" ]]; then
+#     bertlmbdas="1-0.1084"
+#     scibertlmbdas="1-0.1005"
+# elif [[ ${data} == "scicite-acl" ]]; then
+#     bertlmbdas="1-0.2273"
+#     scibertlmbdas="1-0.2760"
+# else
+#     echo "Warning: Unrecognized value of data: ${data}"
+# fi
+
+# if [[ ${data} == "acl-kim-scicite" ]]; then
+#     bertlmbdas="1-0.0871-0.0664"
+#     scibertlmbdas="1-0.0890-0.0849"
+# elif [[ ${data} == "kim-acl-scicite" ]]; then
+#     bertlmbdas="1-0.1491-0.0934"
+#     scibertlmbdas="1-0.2059-0.1274"
+# elif [[ ${data} == "scicite-acl-kim" ]]; then
+#     bertlmbdas="1-0.2273-0.1084"
+#     scibertlmbdas="1-0.2760-0.1005"
+# else
+#     echo "Warning: Unrecognized value of data: ${data}"
+# fi
+
+
 if [[ ${data} == "kim-acl" ]]; then
-    bertlmbdas="1-0.1491"
-    scibertlmbdas="1-0.2059"
+    bertlmbdas="1-0.1369"
+    scibertlmbdas="1-0.1863"
 elif [[ ${data} == "kim-scicite" ]]; then
-    bertlmbdas="1-0.0934"
-    scibertlmbdas="1-0.1274"
+    bertlmbdas="1-0.0927"
+    scibertlmbdas="1-0.0782"
 elif [[ ${data} == "acl-scicite" ]]; then
-    bertlmbdas="1-0.0664"
-    scibertlmbdas="1-0.0849"
+    bertlmbdas="1-0.0818"
+    scibertlmbdas="1-0.0592"
 elif [[ ${data} == "acl-kim" ]]; then
-    bertlmbdas="1-0.0871"
-    scibertlmbdas="1-0.0890"
+    bertlmbdas="1-0.0795"
+    scibertlmbdas="1-0.0935"
 elif [[ ${data} == "scicite-kim" ]]; then
-    bertlmbdas="1-0.1084"
-    scibertlmbdas="1-0.1005"
+    bertlmbdas="1-0.0926"
+    scibertlmbdas="1-0.1108"
 elif [[ ${data} == "scicite-acl" ]]; then
-    bertlmbdas="1-0.2273"
-    scibertlmbdas="1-0.2760"
+    bertlmbdas="1-0.2242"
+    scibertlmbdas="1-0.2803"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
 
 if [[ ${data} == "acl-kim-scicite" ]]; then
-    bertlmbdas="1-0.0871-0.0664"
-    scibertlmbdas="1-0.0890-0.0849"
+    bertlmbdas="1-0.0795-0.0818"
+    scibertlmbdas="1-0.0935-0.0592"
 elif [[ ${data} == "kim-acl-scicite" ]]; then
-    bertlmbdas="1-0.1491-0.0934"
-    scibertlmbdas="1-0.2059-0.1274"
+    bertlmbdas="1-0.1369-0.0927"
+    scibertlmbdas="1-0.1863-0.0782"
 elif [[ ${data} == "scicite-acl-kim" ]]; then
-    bertlmbdas="1-0.2273-0.1084"
-    scibertlmbdas="1-0.2760-0.1005"
+    bertlmbdas="1-0.2242-0.0926"
+    scibertlmbdas="1-0.2803-0.1108"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
