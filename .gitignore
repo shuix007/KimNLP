@@ -4,6 +4,7 @@
 **/results/
 **/PastLog*/
 **/Notebooks/
+**/OldData/
 *.txt
 *.csv
 *.png
