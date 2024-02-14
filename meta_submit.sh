@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 declare -a seed_list=("1" "2" "3")
-declare -a double_data_list=("kim-acl" "kim-scicite" "acl-scicite" "acl-kim" "scicite-kim" "scicite-acl")
+declare -a double_data_list=("kim-acl" "kim-scicite" "acl-scicite") # "acl-kim" "scicite-kim" "scicite-acl")
 declare -a triple_data_list=("acl-kim-scicite" "kim-acl-scicite" "scicite-acl-kim")
 declare -a lambda_list=("0.1" "0.2" "0.3" "0.4" "0.5" "0.6" "0.7" "0.8" "0.9" "1.0")
 

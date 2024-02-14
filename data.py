@@ -72,6 +72,8 @@ class CollateFn(object):
             batched_text = self._tokenize_context(text)
             labels = torch.stack(labels)
             ds_indices = torch.stack(ds_indices)
+
+            # print(torch.unique(ds_indices, return_counts=True))
             return batched_text, labels, ds_indices, copy.deepcopy(self.class_tokens), self.class_head_indices
 
 # class PLDataset(object):
@@ -260,7 +262,7 @@ class Datasets(object):
 #         return (self.text[idx], self.labels[idx], self.ds_index[idx])
 
 class MultiHeadDatasets(object):
-    def __init__(self, datasets):
+    def __init__(self, datasets, batch_size_factor=2):
         self.text = []
         self.ds_index = []
         self.labels = []
@@ -269,13 +271,14 @@ class MultiHeadDatasets(object):
 
         self.dataset_sizes = [len(d.labels) for d in datasets]
         if len(self.dataset_sizes) > 1:
-            if self.dataset_sizes[0] >= sum(self.dataset_sizes[1:]):
+            if sum(self.dataset_sizes) / self.dataset_sizes[0] <= batch_size_factor:
+            # if self.dataset_sizes[0] >= sum(self.dataset_sizes[1:]):
                 self.sample_auxiliary = False
-                self.adjusted_batch_size_factor = sum(self.dataset_sizes) / self.dataset_sizes[0] # <= 2
+                self.adjusted_batch_size_factor = sum(self.dataset_sizes) / self.dataset_sizes[0] # <= batch_size_factor
             else:
                 self.sample_auxiliary = True
                 self.sample_distribution = np.array([d.lmbd for d in datasets[1:]]) / sum([d.lmbd for d in datasets[1:]])
-                self.adjusted_batch_size_factor = 2
+                self.adjusted_batch_size_factor = batch_size_factor
         else:
             self.sample_auxiliary = False
             self.adjusted_batch_size_factor = 1
@@ -301,7 +304,7 @@ class MultiHeadDatasets(object):
 
     def __len__(self):
         if self.sample_auxiliary: # if the auxiliary dataset is larger than the main dataset
-            return self.dataset_sizes[0] * 2
+            return self.dataset_sizes[0] * self.adjusted_batch_size_factor
         return len(self.labels)
     
     def __getitem__(self, idx):

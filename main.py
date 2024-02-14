@@ -188,7 +188,7 @@ def main_mtl(args):
                 data_filename, args.class_definition, split='train', lmbd=lambdas[i+1]
             )
             train_datasets_list.append(aux_data)
-    train_datasets = MultiHeadDatasets(train_datasets_list)
+    train_datasets = MultiHeadDatasets(train_datasets_list, batch_size_factor=args.batch_size_factor)
     if train_datasets.adjusted_batch_size_factor > 1:
         args.batch_size = int(args.batch_size * train_datasets.adjusted_batch_size_factor)
         print('Adjusting the training batch size to {}.'.format(args.batch_size))
@@ -210,7 +210,10 @@ def main_mtl(args):
         )
         print('Finetuning LM + MLP.')
         finetuner.train()
+        print('Evaluating end of training checkpoint.')
+        preds = finetuner.test()
         finetuner.load_model()
+        print('Evaluating best val checkpoint.')
         preds = finetuner.test()
     else:
         finetuner = MultiHeadTrainer(
@@ -252,6 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--lm', default='scibert', type=str)
     parser.add_argument('--pl', default='pl', type=str)
     parser.add_argument('--max_length', default=512, type=int)
+    parser.add_argument('--batch_size_factor', default=3, type=int)
     parser.add_argument('--readout', default='cls', type=str)
 
     args = parser.parse_args()
