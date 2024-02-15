@@ -98,37 +98,74 @@ cd /home/karypisg/shuix007/KimNLP/KimNLP
 #     echo "Warning: Unrecognized value of data: ${data}"
 # fi
 
+# TRL on validation set
+# if [[ ${data} == "kim-acl" ]]; then
+#     bertlmbdas="1-0.2415"
+#     scibertlmbdas="1-0.2954"
+# elif [[ ${data} == "kim-scicite" ]]; then
+#     bertlmbdas="1-0.1536"
+#     scibertlmbdas="1-0.1473"
+# elif [[ ${data} == "acl-scicite" ]]; then
+#     bertlmbdas="1-0.0821"
+#     scibertlmbdas="1-0.0718"
+# elif [[ ${data} == "acl-kim" ]]; then
+#     bertlmbdas="1-0.0960"
+#     scibertlmbdas="1-0.1191"
+# elif [[ ${data} == "scicite-kim" ]]; then
+#     bertlmbdas="1-0.1030"
+#     scibertlmbdas="1-0.0931"
+# elif [[ ${data} == "scicite-acl" ]]; then
+#     bertlmbdas="1-0.2336"
+#     scibertlmbdas="1-0.2940"
+# else
+#     echo "Warning: Unrecognized value of data: ${data}"
+# fi
+
+# if [[ ${data} == "acl-kim-scicite" ]]; then
+#     bertlmbdas="1-0.0960-0.0821"
+#     scibertlmbdas="1-0.1191-0.0718"
+# elif [[ ${data} == "kim-acl-scicite" ]]; then
+#     bertlmbdas="1-0.2415-0.1536"
+#     scibertlmbdas="1-0.2954-0.1473"
+# elif [[ ${data} == "scicite-acl-kim" ]]; then
+#     bertlmbdas="1-0.2336-0.1030"
+#     scibertlmbdas="1-0.2940-0.0931"
+# else
+#     echo "Warning: Unrecognized value of data: ${data}"
+# fi
+
+# TRL on training set
 if [[ ${data} == "kim-acl" ]]; then
-    bertlmbdas="1-0.2415"
-    scibertlmbdas="1-0.2954"
+    bertlmbdas="1-0.1488"
+    scibertlmbdas="1-0.1889"
 elif [[ ${data} == "kim-scicite" ]]; then
-    bertlmbdas="1-0.1536"
-    scibertlmbdas="1-0.1473"
+    bertlmbdas="1-0.0800"
+    scibertlmbdas="1-0.0805"
 elif [[ ${data} == "acl-scicite" ]]; then
-    bertlmbdas="1-0.0821"
-    scibertlmbdas="1-0.0718"
+    bertlmbdas="1-0.0746"
+    scibertlmbdas="1-0.0652"
 elif [[ ${data} == "acl-kim" ]]; then
-    bertlmbdas="1-0.0960"
-    scibertlmbdas="1-0.1191"
+    bertlmbdas="1-0.0922"
+    scibertlmbdas="1-0.0951"
 elif [[ ${data} == "scicite-kim" ]]; then
-    bertlmbdas="1-0.1030"
-    scibertlmbdas="1-0.0931"
+    bertlmbdas="1-0.1095"
+    scibertlmbdas="1-0.1059"
 elif [[ ${data} == "scicite-acl" ]]; then
-    bertlmbdas="1-0.2336"
-    scibertlmbdas="1-0.2940"
+    bertlmbdas="1-0.2339"
+    scibertlmbdas="1-0.2785"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
 
 if [[ ${data} == "acl-kim-scicite" ]]; then
-    bertlmbdas="1-0.0960-0.0821"
-    scibertlmbdas="1-0.1191-0.0718"
+    bertlmbdas="1-0.0922-0.0746"
+    scibertlmbdas="1-0.0951-0.0652"
 elif [[ ${data} == "kim-acl-scicite" ]]; then
-    bertlmbdas="1-0.2415-0.1536"
-    scibertlmbdas="1-0.2954-0.1473"
+    bertlmbdas="1-0.1488-0.0800"
+    scibertlmbdas="1-0.1889-0.0805"
 elif [[ ${data} == "scicite-acl-kim" ]]; then
-    bertlmbdas="1-0.2336-0.1030"
-    scibertlmbdas="1-0.2940-0.0931"
+    bertlmbdas="1-0.2339-0.1095"
+    scibertlmbdas="1-0.2785-0.1059"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
