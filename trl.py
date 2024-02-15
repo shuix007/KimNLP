@@ -37,7 +37,7 @@ def trl(labels, pred_logits):
     print('Base entropy: {:.4f}, pred entropy: {:.4f}, lambda: {:.4f}'.format(base_entropy, pred_entropy, lambda_))
 
 def list_workspaces(workspace_dir):
-    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-02')]
+    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-02-15') and 'ch' in f]
 
     workspace_dict = {
         'bert': {
@@ -105,7 +105,7 @@ def main_trl(args):
                 
                 for i, data_filename in enumerate(data_filenames[1:]):
                     aux_data, aux_label_map = create_single_data_object(
-                        data_filename, args.class_definition, split='train', lmbd=1.
+                        data_filename, args.class_definition, split='val', lmbd=1.
                     )
                     aux_preds = finetuner.test(outside_dataset=aux_data)
                     aux_labels = aux_data.original_labels.numpy()
@@ -140,7 +140,7 @@ if __name__ == '__main__':
     parser.add_argument('--lm', default='scibert', type=str)
     parser.add_argument('--pl', default='pls', type=str)
     parser.add_argument('--max_length', default=512, type=int)
-    parser.add_argument('--readout', default='cls', type=str)
+    parser.add_argument('--readout', default='ch', type=str)
 
     args = parser.parse_args()
 
