@@ -255,8 +255,8 @@ if __name__ == '__main__':
     parser.add_argument('--lm', default='scibert', type=str)
     parser.add_argument('--pl', default='pl', type=str)
     parser.add_argument('--max_length', default=512, type=int)
-    parser.add_argument('--batch_size_factor', default=3, type=int)
-    parser.add_argument('--readout', default='cls', type=str)
+    parser.add_argument('--batch_size_factor', default=2, type=int)
+    parser.add_argument('--readout', default='ch', type=str)
 
     args = parser.parse_args()
 
