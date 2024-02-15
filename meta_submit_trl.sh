@@ -6,7 +6,7 @@ declare -a triple_data_list=("acl-kim-scicite" "kim-acl-scicite" "scicite-acl-ki
 
 for seed in ${seed_list[@]}; do
 for data in ${double_data_list[@]}; do
-    sbatch --exclude=aga[39-40] slurm_trl.sh \
+    sbatch slurm_trl.sh \
         -s ${seed} \
         -d ${data}
 done
@@ -14,7 +14,7 @@ done
 
 for seed in ${seed_list[@]}; do
 for data in ${triple_data_list[@]}; do
-    sbatch --exclude=aga[39-40] slurm_trl.sh \
+    sbatch slurm_trl.sh \
         -s ${seed} \
         -d ${data}
 done
