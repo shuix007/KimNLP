@@ -19,5 +19,35 @@
             "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
             "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
             "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
+        },
+    "scicite_005":
+        {
+            "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
+            "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
+            "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
+        },
+    "scicite_010":
+        {
+            "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
+            "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
+            "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
+        },
+    "scicite_020":
+        {
+            "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
+            "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
+            "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
+        },
+    "scicite_050":
+        {
+            "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
+            "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
+            "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
+        },
+    "scicite_080":
+        {
+            "Background": "The citation states, mentions, or points to the background information giving more context about a problem, concept, approach, topic, or importance of the problem that is discussed in the present paper.",
+            "Method": "The present paper uses a method, tool, approach or dataset that is proposed in the paper associated with the citation.",
+            "Result": "The present paper compares its results/findings with the results/findings of the paper associated with the citation."
         }
 }
