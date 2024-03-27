@@ -25,6 +25,7 @@ class Trainer(object):
 
         self.workspace = args.workspace
         self.model = model
+        self.modelname = args.lm
 
         self.load(train_dataset, val_dataset, test_dataset)
 
@@ -43,7 +44,13 @@ class Trainer(object):
                                lr=self.args.lr, weight_decay=self.args.l2)
     
     def load_datasets(self, train_dataset, val_dataset, test_dataset):
-        modelname = 'allenai/scibert_scivocab_uncased' if self.args.lm == 'scibert' else 'bert-base-uncased'
+        # modelname = 'allenai/scibert_scivocab_uncased' if self.args.lm == 'scibert' else 'bert-base-uncased'
+        if self.args.lm == 'scibert':
+            modelname = 'allenai/scibert_scivocab_uncased'
+        elif self.args.lm == 'bert':
+            modelname = 'bert-base-uncased'
+        else:
+            modelname = self.args.lm
         self.collate_fn = CollateFn(modelname=modelname, instance_weights=True)
         self.train_dataloader = DataLoader(
             train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.collate_fn)
