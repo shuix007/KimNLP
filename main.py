@@ -14,7 +14,12 @@ import argparse
 N_CLASSES = {
     'kim': 3,
     'acl': 6,
-    'scicite': 3
+    'scicite': 3,
+    'scicite_005': 3,
+    'scicite_010': 3,
+    'scicite_020': 3,
+    'scicite_050': 3,
+    'scicite_080': 3,
 }
 
 def main_pl(args):
