@@ -39,11 +39,11 @@ python main.py \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${readout}-scibert \
     --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${readout}-scibert-log.txt
 
-python main.py \
-    --dataset=${data} \
-    --lambdas=1 \
-    --data_dir=Data \
-    --lm=bert \
-    --readout=${readout} \
-    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert \
-    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert-log.txt
+# python main.py \
+#     --dataset=${data} \
+#     --lambdas=1 \
+#     --data_dir=Data \
+#     --lm=bert \
+#     --readout=${readout} \
+#     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert \
+#     --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${readout}-bert-log.txt
