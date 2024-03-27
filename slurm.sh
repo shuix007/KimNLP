@@ -35,15 +35,15 @@ python main.py \
     --lambdas=${lmbdas} \
     --data_dir=Data \
     --lm=scibert \
-    --readout=ch \
+    --readout=cls \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert \
     --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert-log.txt
 
-python main.py \
-    --dataset=${data} \
-    --lambdas=${lmbdas} \
-    --data_dir=Data \
-    --lm=bert \
-    --readout=ch \
-    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert \
-    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert-log.txt
+# python main.py \
+#     --dataset=${data} \
+#     --lambdas=${lmbdas} \
+#     --data_dir=Data \
+#     --lm=bert \
+#     --readout=ch \
+#     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert \
+#     --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-bert-log.txt
