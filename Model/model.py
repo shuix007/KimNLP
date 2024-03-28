@@ -27,7 +27,12 @@ class LanguageModel(nn.Module):
 
     def readout(self, model_inputs, model_outputs, readout_masks=None):
         if self.readout_fn == 'cls':
-            text_representations = model_outputs.last_hidden_state[:, 0]
+            if 'bert' in self.modelname:
+                text_representations = model_outputs.last_hidden_state[:, 0]
+            elif 'xlnet' in self.modelname:
+                text_representations = model_outputs.last_hidden_state[:, -1]
+            else:
+                raise ValueError('Invalid model name {} for the cls readout.'.format(self.modelname))
         elif self.readout_fn == 'mean':
             text_representations = mask_pooling(model_outputs, model_inputs['attention_mask'])
         elif self.readout_fn == 'ch' and readout_masks is not None:
