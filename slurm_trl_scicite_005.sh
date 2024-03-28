@@ -28,7 +28,7 @@ conda activate KimNLP
 cd /home/karypisg/shuix007/KimNLP/KimNLP
 
 # TRL on training set
-elif [[ ${data} == "scicite_005-kim" ]]; then
+if [[ ${data} == "scicite_005-kim" ]]; then
     clslmbdas="1-0.0473"
     chlmbdas="1-0.1016"
 elif [[ ${data} == "scicite_005-acl" ]]; then
@@ -38,7 +38,7 @@ else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
 
-elif [[ ${data} == "scicite_005-acl-kim" ]]; then
+if [[ ${data} == "scicite_005-acl-kim" ]]; then
     clslmbdas="1-0.0365-0.0473"
     chlmbdas="1-0.0964-0.1016"
 else
