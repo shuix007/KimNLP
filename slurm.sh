@@ -39,6 +39,15 @@ python main.py \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert \
     --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert-log.txt
 
+python main.py \
+    --dataset=${data} \
+    --lambdas=${lmbdas} \
+    --data_dir=Data \
+    --lm=scibert \
+    --readout=ch \
+    --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert-ch \
+    --seed=${seed} &> ${CURRENTEPOCTIME}-${data}-${seed}-${lmbdas}-scibert-ch.txt
+
 # python main.py \
 #     --dataset=${data} \
 #     --lambdas=${lmbdas} \
