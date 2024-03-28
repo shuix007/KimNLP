@@ -16,7 +16,12 @@ import argparse
 N_CLASSES = {
     'kim': 3,
     'acl': 6,
-    'scicite': 3
+    'scicite': 3,
+    'scicite_005': 3,
+    'scicite_010': 3,
+    'scicite_020': 3,
+    'scicite_050': 3,
+    'scicite_080': 3,
 }
 
 def trl(labels, pred_logits):
@@ -37,18 +42,27 @@ def trl(labels, pred_logits):
     print('Base entropy: {:.4f}, pred entropy: {:.4f}, lambda: {:.4f}'.format(base_entropy, pred_entropy, lambda_))
 
 def list_workspaces(workspace_dir):
-    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-02-15') and 'ch' in f]
+    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-03-27') and '005' in f and 'cls' in f]
 
+    # workspace_dict = {
+    #     'bert': {
+    #         'acl': [],
+    #         'kim': [],
+    #         'scicite': []
+    #     },
+    #     'scibert': {
+    #         'acl': [],
+    #         'kim': [],
+    #         'scicite': []
+    #     }
+    # }
     workspace_dict = {
-        'bert': {
-            'acl': [],
-            'kim': [],
-            'scicite': []
-        },
         'scibert': {
-            'acl': [],
-            'kim': [],
-            'scicite': []
+            'scicite_005': [],
+            'scicite_010': [],
+            'scicite_020': [],
+            'scicite_050': [],
+            'scicite_080': [],
         }
     }
 
@@ -63,15 +77,15 @@ def list_workspaces(workspace_dir):
 def main_trl(args):
     workspaces = list_workspaces(args.workspace_all)
 
-    for lm in ['bert', 'scibert']:
+    for lm in ['scibert']:
         args.lm = lm
         if lm == 'scibert':
             modelname = 'allenai/scibert_scivocab_uncased'
         elif lm == 'bert':
             modelname = 'bert-base-uncased'
 
-        for ds in ['acl', 'kim', 'scicite']:
-            aux_datasets = ['acl', 'kim', 'scicite']
+        for ds in ['scicite_005']:
+            aux_datasets = ['acl', 'kim', 'scicite_005']
             aux_datasets.remove(ds)
             datasets = [ds] + aux_datasets
             data_filenames = [os.path.join(args.data_dir, d+'.tsv') for d in datasets]
@@ -105,7 +119,7 @@ def main_trl(args):
                 
                 for i, data_filename in enumerate(data_filenames[1:]):
                     aux_data, aux_label_map = create_single_data_object(
-                        data_filename, args.class_definition, split='val', lmbd=1.
+                        data_filename, args.class_definition, split='train', lmbd=1.
                     )
                     aux_preds = finetuner.test(outside_dataset=aux_data)
                     aux_labels = aux_data.original_labels.numpy()
