@@ -40,6 +40,12 @@ elif [[ ${data} == "scicite_020-kim" ]]; then
 elif [[ ${data} == "scicite_020-acl" ]]; then
     clslmbdas="1-0.0301"
     chlmbdas="1-0.0636"
+elif [[ ${data} == "scicite_050-kim" ]]; then
+    clslmbdas="1-0.0856"
+    chlmbdas="1-0.0987"
+elif [[ ${data} == "scicite_050-acl" ]]; then
+    clslmbdas="1-0.0453"
+    chlmbdas="1-0.0745"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
@@ -50,6 +56,9 @@ if [[ ${data} == "scicite_005-acl-kim" ]]; then
 elif [[ ${data} == "scicite_020-acl-kim" ]]; then
     clslmbdas="1-0.0301-0.0678"
     chlmbdas="1-0.0636-0.0794"
+elif [[ ${data} == "scicite_050-acl-kim" ]]; then
+    clslmbdas="1-0.0453-0.0856"
+    chlmbdas="1-0.0745-0.0987"
 else
     echo "Warning: Unrecognized value of data: ${data}"
 fi
