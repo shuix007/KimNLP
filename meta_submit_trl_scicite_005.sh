@@ -1,8 +1,8 @@
 #!/bin/bash -l
 
 declare -a seed_list=("1" "2" "3" "4" "5")
-declare -a double_data_list=("scicite_005-kim" "scicite_005-acl")
-declare -a triple_data_list=("scicite_005-acl-kim")
+declare -a double_data_list=("scicite_020-kim" "scicite_020-acl")
+declare -a triple_data_list=("scicite_020-acl-kim")
 
 for seed in ${seed_list[@]}; do
 for data in ${double_data_list[@]}; do
