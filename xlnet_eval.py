@@ -82,6 +82,8 @@ if __name__ == '__main__':
         evaluation_strategy="steps",
         save_strategy="steps",
         load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        save_total_limit=1,
         warmup_steps=500,
         save_steps=500,
         seed=args.seed,
@@ -101,8 +103,8 @@ if __name__ == '__main__':
 
     trainer.train()
 
-    model = trainer.model
-
+    # model = trainer.model
+    
     model.cuda()
     model.eval()
 
