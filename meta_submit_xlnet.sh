@@ -7,6 +7,6 @@ for seed in ${seed_list[@]}; do
 for data in ${data_list[@]}; do
     sbatch slurm_xlnet.sh \
         -d ${data} \
-        -s ${seed} \
+        -s ${seed}
 done
 done
