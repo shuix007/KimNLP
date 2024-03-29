@@ -29,7 +29,7 @@ cd /home/karypisg/shuix007/KimNLP/KimNLP
 
 CURRENTEPOCTIME=`date +"%Y-%m-%d-%H-%M-%S"`
 # Run the PyTorch training script
-python main.py \
+python xlnet_eval.py \
     --dataset=${data} \
     --data_dir=Data \
     --workspace=Workspaces/${CURRENTEPOCTIME}-${data}-${seed}-xlnet \
