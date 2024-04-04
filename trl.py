@@ -42,7 +42,7 @@ def trl(labels, pred_logits):
     print('Base entropy: {:.4f}, pred entropy: {:.4f}, lambda: {:.4f}'.format(base_entropy, pred_entropy, lambda_))
 
 def list_workspaces(workspace_dir):
-    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-03-27') and '050' in f and 'cls' in f]
+    workspaces = [f for f in os.listdir(workspace_dir) if f.startswith('2024-04-03') and 'ch' in f]
 
     # workspace_dict = {
     #     'bert': {
@@ -58,6 +58,8 @@ def list_workspaces(workspace_dir):
     # }
     workspace_dict = {
         'scibert': {
+            'acl': [],
+            'kim': [],
             'scicite_005': [],
             'scicite_010': [],
             'scicite_020': [],
@@ -84,9 +86,9 @@ def main_trl(args):
         elif lm == 'bert':
             modelname = 'bert-base-uncased'
 
-        for ds in ['scicite_050']:
-            aux_datasets = ['acl', 'kim', 'scicite_050']
-            aux_datasets.remove(ds)
+        for ds in ['acl', 'kim']:
+            aux_datasets = ['scicite_005', 'scicite_020', 'scicite_050']
+            # aux_datasets.remove(ds)
             datasets = [ds] + aux_datasets
             data_filenames = [os.path.join(args.data_dir, d+'.tsv') for d in datasets]
 
